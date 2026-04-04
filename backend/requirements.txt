@@ -1,0 +1,11 @@
+django>=4.2,<5.0
+djangorestframework>=3.14
+django-cors-headers>=4.0
+dj-database-url>=2.0
+psycopg2-binary>=2.9
+scikit-fuzzy>=0.4.2
+numpy>=1.24
+scipy>=1.11
+networkx>=3.0
+packaging>=23.0
+python-dotenv>=1.0
