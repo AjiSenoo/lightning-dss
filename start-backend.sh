@@ -11,6 +11,11 @@ fi
 source venv/bin/activate
 pip install -r requirements.txt -q
 
+# Load .env if present (provides DATABASE_URL and other overrides)
+if [ -f .env ]; then
+  set -a; source .env; set +a
+fi
+
 echo "Running migrations..."
 python manage.py migrate
 
