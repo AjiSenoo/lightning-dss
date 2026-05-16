@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: lightning_dss
+      POSTGRES_USER: lightning
+      POSTGRES_PASSWORD: lightning
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

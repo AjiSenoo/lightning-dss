@@ -1,5 +1,21 @@
 import uuid
+from django.contrib.auth.models import AbstractUser
 from django.db import models
+
+
+class Organization(models.Model):
+    org_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    nama = models.CharField(max_length=255)
+    alamat = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'organizations'
+        ordering = ['nama']
+
+    def __str__(self):
+        return self.nama
+
 
 LPL_CHOICES = [
     ('I', 'LPL I'),
@@ -14,12 +30,6 @@ LPL_CAPACITY_MAP = {
     'III': 100,
     'IV': 100,
 }
-
-SOURCE_TYPE_CHOICES = [
-    ('Manual', 'Manual'),
-    ('AudioEstimation', 'Audio Estimation'),
-    ('Sensor', 'Sensor'),
-]
 
 AIR_TERMINAL_STATUS = [
     ('OK', 'OK'),
@@ -67,6 +77,9 @@ ROLE_CHOICES = [
 
 class AssetRegistry(models.Model):
     asset_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.PROTECT, null=True, blank=True, related_name='assets'
+    )
     nama_gedung = models.CharField(max_length=255)
     lokasi_gps = models.CharField(max_length=100, help_text="Lat, Lng string")
     lpl_grade = models.CharField(max_length=4, choices=LPL_CHOICES)
@@ -97,10 +110,12 @@ class LightningEvent(models.Model):
     timestamp = models.DateTimeField()
     estimasi_arus_puncak_ka = models.FloatField(help_text="Ipeak in kA")
     rasio_stres = models.FloatField(editable=False, default=0.0, help_text="Auto: Ipeak / kapasitas_desain_ka")
-    source_type = models.CharField(max_length=20, choices=SOURCE_TYPE_CHOICES, default='Manual')
     fuzzy_output_score = models.FloatField(null=True, blank=True, help_text="IUI 0-100")
     fuzzy_output_label = models.CharField(max_length=30, blank=True, default='')
     catatan = models.TextField(blank=True, default='')
+    created_by = models.ForeignKey(
+        'User', on_delete=models.PROTECT, null=True, blank=True, related_name='events_recorded'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
@@ -120,17 +135,21 @@ class LightningEvent(models.Model):
         return f"Event {self.estimasi_arus_puncak_ka}kA on {self.asset.nama_gedung}"
 
 
-class User(models.Model):
-    user_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+class User(AbstractUser):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.PROTECT, null=True, blank=True, related_name='users'
+    )
     nama_lengkap = models.CharField(max_length=100)
-    role = models.CharField(max_length=10, choices=ROLE_CHOICES)
+    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='Teknisi')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'users'
+        ordering = ['username']
 
     def __str__(self):
-        return f"{self.nama_lengkap} ({self.role})"
+        return f"{self.nama_lengkap or self.username} ({self.role})"
 
 
 class InspectionLog(models.Model):
@@ -156,8 +175,20 @@ class InspectionLog(models.Model):
 
     # Evidence
     catatan_teknisi = models.TextField(blank=True, default='')
-    foto_bukti_url = models.TextField(blank=True, default='', help_text="Comma-separated photo paths")
+
+    # Amendment chain — corrections after the 5-min grace window create new logs that link here.
+    amends = models.ForeignKey(
+        'self', on_delete=models.PROTECT, null=True, blank=True, related_name='amendments'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        'User', on_delete=models.SET_NULL, null=True, blank=True, related_name='inspections_last_edited'
+    )
+    deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    deleted_by = models.ForeignKey(
+        'User', on_delete=models.SET_NULL, null=True, blank=True, related_name='inspections_deleted'
+    )
 
     class Meta:
         db_table = 'inspection_logs'
@@ -165,3 +196,52 @@ class InspectionLog(models.Model):
 
     def __str__(self):
         return f"Inspection on {self.asset.nama_gedung} ({self.tgl_inspeksi.date()})"
+
+
+AUDIT_ACTIONS = [
+    ('create',      'Created'),
+    ('update',      'Edited'),
+    ('amend',       'Amended'),
+    ('amended_by',  'Amended By'),
+    ('photo_added', 'Photo Added'),
+    ('delete',      'Soft-deleted'),
+    ('restore',     'Restored'),
+    ('purge',       'Hard-deleted'),
+]
+
+
+class InspectionLogAudit(models.Model):
+    audit_id   = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    inspection = models.ForeignKey(
+        InspectionLog, on_delete=models.CASCADE, related_name='audit_trail'
+    )
+    actor = models.ForeignKey(
+        'User', on_delete=models.SET_NULL, null=True, blank=True, related_name='audit_actions'
+    )
+    action = models.CharField(max_length=20, choices=AUDIT_ACTIONS)
+    diff   = models.JSONField(default=dict, blank=True)
+    note   = models.CharField(max_length=255, blank=True, default='')
+    at     = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'inspection_log_audit'
+        ordering = ['-at']
+        indexes = [models.Index(fields=['inspection', '-at'], name='audit_inspection_at_idx')]
+
+    def __str__(self):
+        return f'{self.action} on {self.inspection_id} by {self.actor_id}'
+
+
+class InspectionPhoto(models.Model):
+    photo_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    inspection = models.ForeignKey(InspectionLog, on_delete=models.CASCADE, related_name='photos')
+    image = models.ImageField(upload_to='inspections/%Y/%m/')
+    caption = models.CharField(max_length=255, blank=True, default='')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'inspection_photos'
+        ordering = ['uploaded_at']
+
+    def __str__(self):
+        return f"Photo for {self.inspection}"

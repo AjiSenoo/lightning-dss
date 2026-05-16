@@ -1,12 +1,19 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import Layout from './components/Layout'
+import ProtectedRoute from './components/ProtectedRoute'
+import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import AssetPortfolio from './pages/AssetPortfolio'
 import AssetDetail from './pages/AssetDetail'
 import EventInput from './pages/EventInput'
 import LogbookForm from './pages/LogbookForm'
-import Recommendation from './pages/Recommendation'
+import InspectionReport from './pages/InspectionReport'
+import LaporanDetail from './pages/LaporanDetail'
+import LaporanTrash from './pages/LaporanTrash'
+import UserManagement from './pages/UserManagement'
+import ManagerOnly from './components/ManagerOnly'
+import { AuthProvider } from './auth/AuthContext'
 import syncManager from './offline/syncManager'
 
 export default function App() {
@@ -25,18 +32,39 @@ export default function App() {
   }, [])
 
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="assets" element={<AssetPortfolio />} />
-          <Route path="assets/:id" element={<AssetDetail />} />
-          <Route path="events/new" element={<EventInput />} />
-          <Route path="inspections/new" element={<LogbookForm />} />
-          <Route path="recommendations" element={<Recommendation />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Dashboard />} />
+            <Route path="assets" element={<AssetPortfolio />} />
+            <Route path="assets/:id" element={<AssetDetail />} />
+            <Route path="events/new" element={<EventInput />} />
+            <Route path="inspections" element={<InspectionReport />} />
+            <Route path="inspections/new" element={<LogbookForm />} />
+            <Route path="inspections/trash" element={<ManagerOnly><LaporanTrash /></ManagerOnly>} />
+            <Route path="inspections/:id" element={<LaporanDetail />} />
+            <Route
+              path="users"
+              element={
+                <ManagerOnly>
+                  <UserManagement />
+                </ManagerOnly>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   )
 }

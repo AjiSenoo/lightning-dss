@@ -118,6 +118,11 @@ This will:
 |----------|---------|-------------|
 | `DATABASE_URL` | SQLite | PostgreSQL connection string for production |
 | `VITE_API_URL` | `http://localhost:8000/api` | Backend API base URL |
+| `W_CUMULATIVE_STRESS` | `0.50` | AHI weight for cumulative strike stress |
+| `W_PHYSICAL_CONDITION` | `0.30` | AHI weight for physical component condition |
+| `W_CALENDAR_AGE` | `0.20` | AHI weight for installation age |
+
+> The three AHI weights must sum to `1.0`. The fuzzy engine asserts this on import and fails fast if misconfigured.
 
 ---
 
