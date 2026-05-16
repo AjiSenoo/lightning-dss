@@ -45,16 +45,40 @@ export default function useOfflineSubmit() {
     }
   }
 
-  const submitInspection = async (inspectionData, asset) => {
+  const submitInspection = async (
+    inspectionData,
+    asset,
+    photoBlobs = [],
+    mode = 'create',
+    logId = null,
+  ) => {
     setIsSubmitting(true)
     try {
       if (isOnline) {
-        const response = await client.post('/inspections/', inspectionData)
+        const fd = new FormData()
+        Object.entries(inspectionData).forEach(([k, v]) => {
+          if (v !== null && v !== undefined) fd.append(k, v)
+        })
+        photoBlobs.forEach((blob, i) => fd.append('photos', blob, `photo_${i + 1}.jpg`))
+        let response
+        if (mode === 'edit' && logId) {
+          response = await client.put(`/inspections/${logId}/`, fd)
+        } else if (mode === 'amend' && logId) {
+          response = await client.post(`/inspections/${logId}/amend/`, fd)
+        } else {
+          response = await client.post('/inspections/', fd)
+        }
         return { ...response.data, provisional: false }
       } else {
+        // Edit/amend require online — queueing them is risky because the source row may
+        // have changed by the time we sync. Surface this clearly.
+        if (mode !== 'create') {
+          throw new Error('Edit dan amandemen hanya tersedia saat online.')
+        }
         await addToSyncQueue({
           type: 'inspection',
           payload: inspectionData,
+          photoBlobs,
           asset_nama: asset.nama_gedung,
         })
         const actualDamage = Math.min(

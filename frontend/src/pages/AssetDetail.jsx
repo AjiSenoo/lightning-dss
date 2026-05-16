@@ -5,29 +5,205 @@ import StrikeChart from '../components/StrikeChart'
 import HealthTrend from '../components/HealthTrend'
 import { HealthGaugeInline } from '../components/HealthGauge'
 import { UrgencyBadge } from '../components/StatusBadge'
-import { LPL_LABELS, formatDate, formatDateTime, getHealthStatus } from '../utils/constants'
+import AssetForm from '../components/AssetForm'
+import FuzzyVisualizer from '../components/FuzzyVisualizer'
+import { LPL_LABELS, URGENCY_ACTIONS, formatDate, formatDateTime, getHealthStatus } from '../utils/constants'
 import cacheStore from '../offline/cacheStore'
+import client from '../api/client'
+import { useAuth, useIsManager } from '../auth/AuthContext'
+
+const GRACE_MS = 5 * 60 * 1000
+
+function IUIExplainer({ asset, latestEvent }) {
+  const [open, setOpen] = useState(false)
+  const initialR = latestEvent?.rasio_stres ?? 0.5
+  const initialD = 1 - (asset?.skor_kesehatan_aset ?? 0.7)
+  const [rStress, setRStress] = useState(initialR)
+  const [dAsset, setDAsset] = useState(initialD)
+  const [simResult, setSimResult] = useState(null)
+  const [simLoading, setSimLoading] = useState(false)
+
+  const runSimulation = async () => {
+    setSimLoading(true)
+    try {
+      const res = await client.get(`/fuzzy/simulate/?r_stress=${rStress}&d_asset=${dAsset}`)
+      setSimResult(res.data)
+    } catch {
+      const { localFuzzyApprox } = await import('../offline/fuzzyLookupTable')
+      const local = localFuzzyApprox(rStress * 100, asset?.lpl_grade || 'III', 1 - dAsset)
+      setSimResult({ score: local.score, label: local.label, provisional: true })
+    } finally {
+      setSimLoading(false)
+    }
+  }
+
+  const RULES = [
+    ['D_asset = Prima', 'Rutin', 'Rutin', 'Prioritas'],
+    ['D_asset = Degradasi', 'Rutin', 'Prioritas', 'Darurat'],
+    ['D_asset = Kritis', 'Prioritas', 'Darurat', 'Darurat'],
+  ]
+
+  return (
+    <div className="card">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between text-left"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <h2 className="text-lg font-bold text-gray-800">🔍 Lihat cara perhitungan IUI</h2>
+        <span className="text-gray-400">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div className="mt-4 space-y-5 border-t pt-4">
+          <p className="text-xs text-gray-500">
+            Nilai di panel ini adalah simulasi — hasil resmi dihitung otomatis saat sambaran direkam.
+          </p>
+
+          <FuzzyVisualizer rStress={rStress} dAsset={dAsset} iuiScore={simResult?.score} />
+
+          <div className="space-y-3">
+            <div>
+              <div className="flex justify-between text-sm mb-1">
+                <label className="text-gray-600">R_stress (Rasio Stres)</label>
+                <span className="font-semibold">{rStress.toFixed(2)}</span>
+              </div>
+              <input
+                type="range" min={0} max={1.5} step={0.01}
+                value={rStress}
+                onChange={(e) => setRStress(parseFloat(e.target.value))}
+                className="w-full accent-blue-600"
+              />
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>0 (tanpa stres)</span><span>0.65 (batas)</span><span>1.5 (ekstrem)</span>
+              </div>
+            </div>
+            <div>
+              <div className="flex justify-between text-sm mb-1">
+                <label className="text-gray-600">D_asset (Degradasi Aset)</label>
+                <span className="font-semibold">{dAsset.toFixed(2)}</span>
+              </div>
+              <input
+                type="range" min={0} max={1} step={0.01}
+                value={dAsset}
+                onChange={(e) => setDAsset(parseFloat(e.target.value))}
+                className="w-full accent-blue-600"
+              />
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>0 (prima)</span><span>0.4 (degradasi)</span><span>1.0 (kritis)</span>
+              </div>
+            </div>
+          </div>
+
+          <button className="btn-primary" onClick={runSimulation} disabled={simLoading}>
+            {simLoading ? 'Menghitung...' : 'Jalankan Inferensi Fuzzy'}
+          </button>
+
+          {simResult && (
+            <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">Hasil IUI</span>
+                <UrgencyBadge label={simResult.label} size="lg" />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">Skor</span>
+                <span className="text-3xl font-bold">{simResult.score?.toFixed(1)}</span>
+              </div>
+              <div className="border-t pt-3 text-sm text-gray-600">
+                {URGENCY_ACTIONS[simResult.label]}
+              </div>
+              {simResult.provisional && (
+                <p className="text-xs text-amber-600">Estimasi lokal (offline)</p>
+              )}
+            </div>
+          )}
+
+          <div className="overflow-x-auto">
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">Matriks Aturan Fuzzy (3×3)</h3>
+            <table className="w-full text-sm text-center border-collapse">
+              <thead>
+                <tr>
+                  <th className="border border-gray-200 px-3 py-2 bg-gray-50"></th>
+                  <th className="border border-gray-200 px-3 py-2 bg-gray-50">R_stress = Rendah</th>
+                  <th className="border border-gray-200 px-3 py-2 bg-gray-50">R_stress = Sedang</th>
+                  <th className="border border-gray-200 px-3 py-2 bg-gray-50">R_stress = Tinggi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {RULES.map(([row, ...cells]) => (
+                  <tr key={row}>
+                    <td className="border border-gray-200 px-3 py-2 font-medium bg-gray-50">{row}</td>
+                    {cells.map((cell, i) => {
+                      const cls = cell === 'Rutin'
+                        ? 'bg-green-50 text-green-700'
+                        : cell === 'Prioritas'
+                        ? 'bg-amber-50 text-amber-700'
+                        : 'bg-red-50 text-red-700'
+                      return (
+                        <td key={i} className={`border border-gray-200 px-3 py-2 font-semibold ${cls}`}>
+                          {cell}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function inspectionEligibility(log, currentUserId, isManager) {
+  const isOwn = currentUserId && log.user === currentUserId
+  const inGrace = log.created_at && (Date.now() - new Date(log.created_at).getTime()) < GRACE_MS
+  const canEdit = (isOwn && inGrace) || isManager
+  const canAmend = ((isOwn && !inGrace) || isManager) && !log.amends
+  return { canEdit, canAmend }
+}
 
 export default function AssetDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const isManager = useIsManager()
+  const { user } = useAuth()
   const [asset, setAsset] = useState(null)
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
+  const [showEdit, setShowEdit] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    const [assetResult, histResult] = await Promise.all([
+      cacheStore.getAsset(id),
+      cacheStore.getAssetHistory(id),
+    ])
+    setAsset(assetResult.data)
+    setHistory(histResult.data || [])
+    setLoading(false)
+  }
 
   useEffect(() => {
-    async function load() {
-      setLoading(true)
-      const [assetResult, histResult] = await Promise.all([
-        cacheStore.getAsset(id),
-        cacheStore.getAssetHistory(id),
-      ])
-      setAsset(assetResult.data)
-      setHistory(histResult.data || [])
-      setLoading(false)
-    }
     load()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  const handleDelete = async () => {
+    if (!confirm(
+      `Hapus aset "${asset.nama_gedung}"? Semua kejadian sambaran dan logbook inspeksi terkait akan ikut terhapus secara permanen.`
+    )) return
+    setDeleting(true)
+    try {
+      await client.delete(`/assets/${id}/`)
+      navigate('/assets', { replace: true })
+    } catch (err) {
+      alert('Gagal menghapus aset: ' + (err?.response?.data?.detail || err.message))
+      setDeleting(false)
+    }
+  }
 
   if (loading) return <div className="text-center py-12 text-gray-400">Memuat detail aset...</div>
   if (!asset) return <div className="text-center py-12 text-gray-400">Aset tidak ditemukan</div>
@@ -44,10 +220,32 @@ export default function AssetDetail() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <button className="btn-secondary" onClick={() => navigate('/assets')}>← Kembali</button>
-        <h1 className="text-xl font-bold text-gray-900 truncate">{asset.nama_gedung}</h1>
+        <h1 className="text-xl font-bold text-gray-900 truncate flex-1 min-w-0">{asset.nama_gedung}</h1>
+        {isManager && (
+          <div className="flex gap-2">
+            <button className="btn-secondary text-sm" onClick={() => setShowEdit(true)}>
+              Edit
+            </button>
+            <button
+              className="text-sm bg-red-50 hover:bg-red-100 text-red-700 px-3 py-2 rounded-lg font-medium disabled:opacity-50"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? 'Menghapus...' : 'Hapus'}
+            </button>
+          </div>
+        )}
       </div>
+
+      {showEdit && (
+        <AssetForm
+          asset={asset}
+          onClose={() => setShowEdit(false)}
+          onSaved={() => load()}
+        />
+      )}
 
       <div className="grid md:grid-cols-2 gap-6">
         {/* Asset profile */}
@@ -151,12 +349,55 @@ export default function AssetDetail() {
                       </p>
                       <p className="text-xs text-gray-400">{formatDateTime(item.data.timestamp)}</p>
                     </div>
-                  ) : (
-                    <div>
-                      <p className="text-sm font-medium">Inspeksi — {item.data.status_air_terminal} / {item.data.status_down_conductor} / {item.data.status_grounding}</p>
-                      <p className="text-xs text-gray-400">{formatDateTime(item.data.tgl_inspeksi)}</p>
-                    </div>
-                  )}
+                  ) : (() => {
+                    const log = item.data
+                    const { canEdit, canAmend } = inspectionEligibility(log, user?.id, isManager)
+                    return (
+                      <div>
+                        <p className="text-sm font-medium flex items-center gap-2 flex-wrap">
+                          {log.amends && (
+                            <span className="text-xs text-amber-700">↳</span>
+                          )}
+                          <span>Inspeksi — {log.status_air_terminal} / {log.status_down_conductor} / {log.status_grounding}</span>
+                          {log.amends && (
+                            <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Amandemen</span>
+                          )}
+                          {!log.amends && log.amendments && log.amendments.length > 0 && (
+                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                              Diamandemen ({log.amendments.length})
+                            </span>
+                          )}
+                          {log.photos && log.photos.length > 0 && (
+                            <span className="text-xs text-gray-500">📷 {log.photos.length}</span>
+                          )}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          {formatDateTime(log.tgl_inspeksi)}
+                          {log.user_nama && <> · {log.user_nama}</>}
+                        </p>
+                        {(canEdit || canAmend) && (
+                          <div className="flex gap-3 mt-1">
+                            {canEdit && (
+                              <button
+                                className="text-xs text-blue-600 hover:underline"
+                                onClick={() => navigate(`/inspections/new?edit=${log.log_id}`)}
+                              >
+                                Edit
+                              </button>
+                            )}
+                            {canAmend && (
+                              <button
+                                className="text-xs text-amber-700 hover:underline"
+                                onClick={() => navigate(`/inspections/new?amend=${log.log_id}`)}
+                              >
+                                Amandemen
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
                 <span className="text-xs text-gray-300">{item.type === 'event' ? '⚡' : '📋'}</span>
               </div>
@@ -164,6 +405,8 @@ export default function AssetDetail() {
           </div>
         )}
       </div>
+
+      <IUIExplainer asset={asset} latestEvent={events[0]} />
     </div>
   )
 }

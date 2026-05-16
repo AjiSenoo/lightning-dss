@@ -5,12 +5,6 @@ import { URGENCY_ACTIONS, LPL_CAPACITY, formatDateTime } from '../utils/constant
 import useOfflineSubmit from '../hooks/useOfflineSubmit'
 import cacheStore from '../offline/cacheStore'
 
-const SOURCE_OPTIONS = [
-  { value: 'Manual', label: 'Manual', desc: 'Input manual dari pengamatan lapangan' },
-  { value: 'AudioEstimation', label: 'Estimasi Audio', desc: 'Berdasarkan estimasi jarak petir dari suara' },
-  { value: 'Sensor', label: 'Sensor', desc: 'Data dari sensor arus petir terpasang' },
-]
-
 function StressGauge({ ratio }) {
   const pct = Math.min(ratio / 1.5, 1)
   const color = ratio < 0.35 ? '#22C55E' : ratio < 0.65 ? '#F59E0B' : '#EF4444'
@@ -44,7 +38,6 @@ export default function EventInput() {
   const [assets, setAssets] = useState([])
   const [selectedAssetId, setSelectedAssetId] = useState(location.state?.assetId || '')
   const [ipeak, setIpeak] = useState('')
-  const [sourceType, setSourceType] = useState('Manual')
   const [catatan, setCatatan] = useState('')
   const [result, setResult] = useState(null)
   const [timestamp, setTimestamp] = useState(() => new Date().toISOString().slice(0, 16))
@@ -65,7 +58,6 @@ export default function EventInput() {
       asset: selectedAssetId,
       timestamp: new Date(timestamp).toISOString(),
       estimasi_arus_puncak_ka: parseFloat(ipeak),
-      source_type: sourceType,
       catatan,
     }
 
@@ -145,42 +137,19 @@ export default function EventInput() {
             </div>
           </div>
 
-          {/* Step 3: Source type */}
+          {/* Step 3: Notes */}
           <div className="card space-y-3">
-            <h2 className="font-semibold text-gray-700">3. Sumber Data</h2>
-            <div className="space-y-2">
-              {SOURCE_OPTIONS.map((opt) => (
-                <label
-                  key={opt.value}
-                  className={`flex items-start gap-3 p-3 rounded-xl cursor-pointer ${
-                    sourceType === opt.value ? 'radio-card-selected' : 'radio-card'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="source"
-                    value={opt.value}
-                    checked={sourceType === opt.value}
-                    onChange={() => setSourceType(opt.value)}
-                    className="mt-0.5"
-                  />
-                  <div>
-                    <p className="font-medium text-sm">{opt.label}</p>
-                    <p className="text-xs text-gray-400">{opt.desc}</p>
-                  </div>
-                </label>
-              ))}
-            </div>
+            <h2 className="font-semibold text-gray-700">3. Catatan</h2>
             <textarea
               className="form-input"
-              rows={2}
+              rows={3}
               placeholder="Catatan tambahan (opsional)"
               value={catatan}
               onChange={(e) => setCatatan(e.target.value)}
             />
           </div>
 
-          <button type="submit" className="btn-primary" disabled={isSubmitting}>
+          <button type="submit" className="btn-primary w-full py-3" disabled={isSubmitting}>
             {isSubmitting ? 'Memproses...' : 'Analisis & Simpan'}
           </button>
         </form>

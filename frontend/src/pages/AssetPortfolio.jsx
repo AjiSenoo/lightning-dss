@@ -2,6 +2,10 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getHealthStatus, LPL_LABELS, formatDate } from '../utils/constants'
 import cacheStore from '../offline/cacheStore'
+import { useIsManager } from '../auth/AuthContext'
+import AssetForm from '../components/AssetForm'
+import EmptyState from '../components/EmptyState'
+import { SkeletonCard } from '../components/Skeleton'
 
 export default function AssetPortfolio() {
   const [assets, setAssets] = useState([])
@@ -9,17 +13,20 @@ export default function AssetPortfolio() {
   const [search, setSearch] = useState('')
   const [filterLpl, setFilterLpl] = useState('')
   const [isStale, setIsStale] = useState(false)
+  const [showCreate, setShowCreate] = useState(false)
   const navigate = useNavigate()
+  const isManager = useIsManager()
+
+  const reload = async () => {
+    setLoading(true)
+    const result = await cacheStore.getAssets()
+    setAssets(result.data || [])
+    setIsStale(result.isStale)
+    setLoading(false)
+  }
 
   useEffect(() => {
-    async function load() {
-      setLoading(true)
-      const result = await cacheStore.getAssets()
-      setAssets(result.data || [])
-      setIsStale(result.isStale)
-      setLoading(false)
-    }
-    load()
+    reload()
   }, [])
 
   const filtered = assets.filter((a) => {
@@ -31,13 +38,31 @@ export default function AssetPortfolio() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-gray-900">Portofolio Aset</h1>
-        {isStale && (
-          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded">
-            Data tersimpan (offline)
-          </span>
-        )}
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Portofolio Aset</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Daftar aset proteksi petir di organisasi Anda</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {isStale && (
+            <span className="pill bg-amber-50 text-amber-700">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              Offline
+            </span>
+          )}
+          {isManager && (
+            <button className="btn-primary" onClick={() => setShowCreate(true)}>
+              + Aset Baru
+            </button>
+          )}
+        </div>
       </div>
+
+      {showCreate && (
+        <AssetForm
+          onClose={() => setShowCreate(false)}
+          onSaved={() => reload()}
+        />
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
@@ -60,53 +85,76 @@ export default function AssetPortfolio() {
       </div>
 
       {loading ? (
-        <div className="text-center py-12 text-gray-400">Memuat aset...</div>
+        <div className="grid gap-3">
+          <SkeletonCard /><SkeletonCard /><SkeletonCard />
+        </div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">Belum ada data aset</div>
+        <EmptyState
+          icon="🏗️"
+          title="Belum ada data aset"
+          description={search || filterLpl
+            ? "Tidak ada aset yang cocok dengan filter saat ini."
+            : "Tambahkan aset pertama untuk mulai memantau sistem proteksi petir."}
+          action={isManager && !search && !filterLpl && (
+            <button className="btn-primary" onClick={() => setShowCreate(true)}>+ Tambah Aset</button>
+          )}
+        />
       ) : (
         <div className="grid gap-3">
-          {filtered.map((asset) => {
+          {filtered.map((asset, i) => {
             const color = getHealthStatus(asset.skor_kesehatan_aset)
             const pct = Math.round((asset.skor_kesehatan_aset ?? 0) * 100)
             return (
               <div
                 key={asset.asset_id}
-                className="card hover:shadow-lg transition-shadow cursor-pointer"
+                className={`card card-hover cursor-pointer hover:-translate-y-0.5 transition-all animate-fade-in-up stagger-${(i % 5) + 1}`}
                 onClick={() => navigate(`/assets/${asset.asset_id}`)}
               >
                 <div className="flex flex-wrap items-center gap-4">
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-900 truncate">{asset.nama_gedung}</p>
-                    <p className="text-sm text-gray-500">{LPL_LABELS[asset.lpl_grade]}</p>
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="font-semibold text-gray-900 truncate">{asset.nama_gedung}</p>
+                      <span className="pill bg-brand-50 text-brand-700 flex-shrink-0">
+                        LPL {asset.lpl_grade}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500">{LPL_LABELS[asset.lpl_grade]}</p>
                   </div>
+
                   {/* Health bar */}
-                  <div className="w-32">
+                  <div className="w-36">
                     <div className="flex justify-between text-xs mb-1">
                       <span className="text-gray-500">Kesehatan</span>
-                      <span className="font-semibold" style={{ color: color.bg }}>{pct}%</span>
+                      <span className="font-bold" style={{ color: color.bg }}>{pct}%</span>
                     </div>
-                    <div className="h-2 bg-gray-100 rounded-full">
+                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                       <div
-                        className="h-2 rounded-full transition-all"
-                        style={{ width: `${pct}%`, backgroundColor: color.bg }}
+                        className="h-full rounded-full transition-all"
+                        style={{
+                          width: `${pct}%`,
+                          background: `linear-gradient(90deg, ${color.bg}, ${color.bg}dd)`,
+                          boxShadow: `0 0 6px ${color.bg}40`,
+                        }}
                       />
                     </div>
                   </div>
-                  <div className="text-right hidden md:block">
-                    <p className="text-xs text-gray-400">Sambaran terakhir</p>
-                    <p className="text-sm">{formatDate(asset.latest_event?.timestamp)}</p>
-                    <p className="text-xs text-gray-400 mt-1">Inspeksi terakhir</p>
-                    <p className="text-sm">{formatDate(asset.latest_inspection_date)}</p>
+
+                  <div className="text-right hidden md:block min-w-[140px]">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium">Sambaran terakhir</p>
+                    <p className="text-xs text-gray-700">{formatDate(asset.latest_event?.timestamp)}</p>
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium mt-1">Inspeksi terakhir</p>
+                    <p className="text-xs text-gray-700">{formatDate(asset.latest_inspection_date)}</p>
                   </div>
+
                   <div className="flex gap-2">
                     <button
-                      className="btn-secondary text-sm"
+                      className="btn-secondary"
                       onClick={(e) => { e.stopPropagation(); navigate('/events/new', { state: { assetId: asset.asset_id } }) }}
                     >
                       ⚡ Sambaran
                     </button>
                     <button
-                      className="btn-secondary text-sm"
+                      className="btn-secondary"
                       onClick={(e) => { e.stopPropagation(); navigate('/inspections/new', { state: { assetId: asset.asset_id } }) }}
                     >
                       📋 Logbook

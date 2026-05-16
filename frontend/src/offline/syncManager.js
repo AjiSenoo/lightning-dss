@@ -91,7 +91,14 @@ class SyncManager {
       }
 
       if (item.type === 'inspection') {
-        const response = await client.post('/inspections/', item.payload)
+        const fd = new FormData()
+        Object.entries(item.payload).forEach(([k, v]) => {
+          if (v !== null && v !== undefined) fd.append(k, v)
+        })
+        if (item.photoBlobs) {
+          item.photoBlobs.forEach((blob, i) => fd.append('photos', blob, `photo_${i + 1}.jpg`))
+        }
+        const response = await client.post('/inspections/', fd)
         serverResult = response.data
         if (serverResult.updated_asset) {
           const db = await getDB()
