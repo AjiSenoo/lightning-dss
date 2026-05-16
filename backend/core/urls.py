@@ -5,6 +5,7 @@ from .views import (
     OrganizationViewSet,
     AssetViewSet, EventViewSet, EventBatchView,
     InspectionViewSet, InspectionBatchView,
+    NotificationViewSet,
     UserViewSet, CurrentUserView,
     DashboardSummaryView, DashboardMapView,
     FuzzySimulateView, HealthCheckView,
@@ -16,6 +17,7 @@ router.register(r'assets', AssetViewSet, basename='asset')
 router.register(r'events', EventViewSet, basename='event')
 router.register(r'inspections', InspectionViewSet, basename='inspection')
 router.register(r'users', UserViewSet, basename='user')
+router.register(r'notifications', NotificationViewSet, basename='notifications')
 
 urlpatterns = [
     path('', include(router.urls)),

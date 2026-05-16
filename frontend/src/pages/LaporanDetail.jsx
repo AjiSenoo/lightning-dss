@@ -109,7 +109,7 @@ function TimelineEntry({ entry, isLast }) {
 
 function DeleteConfirmModal({ log, onConfirm, onCancel }) {
   const purgeDate = new Date()
-  purgeDate.setDate(purgeDate.getDate() + 49)
+  purgeDate.setDate(purgeDate.getDate() + 7)
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-30 flex items-center justify-center p-4 animate-fade-in"
       onClick={onCancel}>

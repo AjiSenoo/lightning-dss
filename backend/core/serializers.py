@@ -1,7 +1,7 @@
 from datetime import timedelta
 from django.conf import settings
 from rest_framework import serializers
-from .models import AssetRegistry, LightningEvent, InspectionLog, InspectionPhoto, InspectionLogAudit, User, Organization
+from .models import AssetRegistry, LightningEvent, InspectionLog, InspectionPhoto, InspectionLogAudit, Notification, User, Organization
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -158,6 +158,44 @@ class InspectionLogAuditSerializer(serializers.ModelSerializer):
             'actor_role', 'action', 'diff', 'note', 'at',
         ]
         read_only_fields = fields
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    actor_nama     = serializers.CharField(source='actor.nama_lengkap', read_only=True)
+    actor_username = serializers.CharField(source='actor.username',     read_only=True)
+    actor_role     = serializers.CharField(source='actor.role',         read_only=True)
+    is_read        = serializers.SerializerMethodField()
+    target_label   = serializers.SerializerMethodField()
+    link_url       = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Notification
+        fields = ['notif_id', 'actor', 'actor_nama', 'actor_username', 'actor_role',
+                  'verb', 'inspection', 'event', 'asset',
+                  'target_label', 'link_url',
+                  'is_read', 'read_at', 'created_at']
+        read_only_fields = fields
+
+    def get_is_read(self, obj):
+        return obj.read_at is not None
+
+    def get_target_label(self, obj):
+        if obj.inspection_id and obj.inspection.asset_id:
+            return obj.inspection.asset.nama_gedung
+        if obj.event_id and obj.event.asset_id:
+            return obj.event.asset.nama_gedung
+        if obj.asset_id:
+            return obj.asset.nama_gedung
+        return ''
+
+    def get_link_url(self, obj):
+        if obj.inspection_id:
+            return f'/inspections/{obj.inspection_id}'
+        if obj.event_id:
+            return f'/assets/{obj.event.asset_id}'
+        if obj.asset_id:
+            return f'/assets/{obj.asset_id}'
+        return '/'
 
 
 class DashboardSummarySerializer(serializers.Serializer):

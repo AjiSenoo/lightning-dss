@@ -122,3 +122,6 @@ SIMPLE_JWT = {
 # After expiry, corrections require POSTing an amendment.
 INSPECTION_EDIT_GRACE_MINUTES = int(os.environ.get('INSPECTION_EDIT_GRACE_MINUTES', '5'))
 INSPECTION_DELETE_GRACE_DAYS = int(os.environ.get('INSPECTION_DELETE_GRACE_DAYS', '7'))  # 1 week
+
+INSPECTION_STALE_THRESHOLD_DAYS = int(os.environ.get('INSPECTION_STALE_THRESHOLD_DAYS', '30'))
+STALE_NOTIFY_COOLDOWN_DAYS      = int(os.environ.get('STALE_NOTIFY_COOLDOWN_DAYS', '7'))

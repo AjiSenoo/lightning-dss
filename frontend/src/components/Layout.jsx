@@ -2,6 +2,8 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import OfflineBanner from './OfflineBanner'
 import SyncIndicator from './SyncIndicator'
+import HeaderClock from './HeaderClock'
+import NotificationBell from './NotificationBell'
 import { useAuth, useIsManager } from '../auth/AuthContext'
 
 const BASE_NAV_ITEMS = [
@@ -65,6 +67,8 @@ export default function Layout() {
           <SyncIndicator />
           {user && (
             <>
+              <HeaderClock />
+              <NotificationBell />
               {/* Avatar + name + org */}
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-full bg-brand-600 ring-2 ring-white/10 flex items-center justify-center text-xs font-bold">

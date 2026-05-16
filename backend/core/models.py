@@ -89,6 +89,7 @@ class AssetRegistry(models.Model):
     jenis_material_konduktor = models.CharField(max_length=50, blank=True, default='')
     resistivitas_tanah = models.FloatField(null=True, blank=True, help_text="Soil resistivity in Ω·m")
     catatan = models.TextField(blank=True, default='')
+    last_stale_notified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -245,3 +246,34 @@ class InspectionPhoto(models.Model):
 
     def __str__(self):
         return f"Photo for {self.inspection}"
+
+
+NOTIFICATION_VERBS = [
+    ('create',      'Created'),
+    ('update',      'Edited'),
+    ('amend',       'Amended'),
+    ('delete',      'Soft-deleted'),
+    ('restore',     'Restored'),
+    ('lightning',   'Lightning recorded'),
+    ('stale_asset', 'Asset overdue for inspection'),
+]
+
+
+class Notification(models.Model):
+    notif_id   = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    recipient  = models.ForeignKey('User', on_delete=models.CASCADE, related_name='notifications')
+    actor      = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    verb       = models.CharField(max_length=20, choices=NOTIFICATION_VERBS)
+    inspection = models.ForeignKey(InspectionLog,  on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    event      = models.ForeignKey(LightningEvent, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    asset      = models.ForeignKey(AssetRegistry,  on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    read_at    = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'notifications'
+        ordering = ['-created_at']
+        indexes  = [models.Index(fields=['recipient', 'read_at'], name='notif_recipient_read_idx')]
+
+    def __str__(self):
+        return f'Notif {self.verb} → {self.recipient_id}'

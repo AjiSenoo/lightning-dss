@@ -55,11 +55,11 @@ export default function LaporanTrash() {
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Tempat Sampah</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Laporan yang dihapus — dapat dipulihkan dalam 49 hari (7 minggu)</p>
+        <p className="text-sm text-gray-500 mt-0.5">Laporan yang dihapus — dapat dipulihkan dalam 7 hari</p>
       </div>
 
       <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700">
-        Laporan di sini akan <strong>dihapus permanen</strong> setelah 49 hari sejak tanggal penghapusan.
+        Laporan di sini akan <strong>dihapus permanen</strong> setelah 7 hari sejak tanggal penghapusan.
         Gunakan tombol <strong>Pulihkan</strong> untuk mengembalikan laporan ke daftar aktif.
       </div>
 

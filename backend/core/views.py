@@ -10,13 +10,14 @@ from rest_framework.views import APIView
 
 from django.conf import settings
 from django.shortcuts import get_object_or_404
-from .models import AssetRegistry, LightningEvent, InspectionLog, InspectionLogAudit, InspectionPhoto, User, Organization
+from .models import AssetRegistry, LightningEvent, InspectionLog, InspectionLogAudit, InspectionPhoto, Notification, User, Organization
 from .permissions import (
     IsManagerForAssets, IsManagerForUsers, IsOwnerOrManagerWithGrace,
 )
 from .serializers import (
     AssetRegistrySerializer, LightningEventSerializer,
-    InspectionLogSerializer, InspectionLogAuditSerializer, UserSerializer, OrganizationSerializer,
+    InspectionLogSerializer, InspectionLogAuditSerializer, NotificationSerializer,
+    UserSerializer, OrganizationSerializer,
     DashboardSummarySerializer, AssetMapSerializer,
 )
 
@@ -49,6 +50,52 @@ def _compute_diff(before, after):
 def _user_org(request):
     """Return the authenticated user's Organization, or None for superusers without an org."""
     return getattr(request.user, 'organization', None)
+
+
+# ── Notification dispatchers ────────────────────────────────────────────────
+
+def _laporan_recipients(inspection, actor):
+    """Cross-role recipients for a laporan state change, excluding the actor."""
+    if not actor or not getattr(actor, 'is_authenticated', False):
+        return User.objects.none()
+    org = getattr(actor, 'organization', None)
+    actor_role = getattr(actor, 'role', None)
+
+    if actor_role == 'Teknisi':
+        qs = User.objects.filter(role='Manajer', is_active=True)
+        if org:
+            qs = qs.filter(organization=org)
+        return qs.exclude(pk=actor.pk)
+
+    if actor_role == 'Manajer':
+        creator = inspection.user
+        if creator and creator.pk != actor.pk and creator.is_active:
+            return User.objects.filter(pk=creator.pk)
+
+    return User.objects.none()
+
+
+def _emit_laporan_notification(inspection, actor, verb):
+    recipients = _laporan_recipients(inspection, actor)
+    if not recipients.exists():
+        return
+    rows = [Notification(recipient=r, actor=actor, verb=verb, inspection=inspection)
+            for r in recipients]
+    Notification.objects.bulk_create(rows)
+
+
+def _emit_lightning_broadcast(event):
+    """Fan-out: notify every Teknisi in the asset's org (excluding the recorder if they're a teknisi)."""
+    org = event.asset.organization
+    qs = User.objects.filter(role='Teknisi', is_active=True)
+    if org:
+        qs = qs.filter(organization=org)
+    actor = event.created_by
+    if actor:
+        qs = qs.exclude(pk=actor.pk)
+    rows = [Notification(recipient=r, actor=actor, verb='lightning', event=event) for r in qs]
+    if rows:
+        Notification.objects.bulk_create(rows)
 
 
 class OrganizationViewSet(viewsets.ReadOnlyModelViewSet):
@@ -119,9 +166,11 @@ class EventViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         from fuzzy_engine import run_inference, calculate_ahi
         user = self.request.user if self.request and self.request.user.is_authenticated else None
-        event = serializer.save(created_by=user)
+        with transaction.atomic():
+            event = serializer.save(created_by=user)
+            _emit_lightning_broadcast(event)
 
-        # Run fuzzy inference
+        # Run fuzzy inference outside the transaction so a failure doesn't roll back the event
         try:
             asset = event.asset
             r_stress = event.rasio_stres
@@ -131,8 +180,7 @@ class EventViewSet(viewsets.ModelViewSet):
             event.fuzzy_output_score = fuzzy_result['score']
             event.fuzzy_output_label = fuzzy_result['label']
             event.save(update_fields=['fuzzy_output_score', 'fuzzy_output_label'])
-        except Exception as e:
-            # Don't fail the request if fuzzy engine errors
+        except Exception:
             pass
 
     def create(self, request, *args, **kwargs):
@@ -235,6 +283,7 @@ class InspectionViewSet(viewsets.ModelViewSet):
                     diff=diff,
                     note='Log diperbarui dalam masa grace',
                 )
+                _emit_laporan_notification(updated, request.user, 'update')
             for f in new_photos:
                 photo = InspectionPhoto.objects.create(inspection=updated, image=f)
                 InspectionLogAudit.objects.create(
@@ -287,6 +336,7 @@ class InspectionViewSet(viewsets.ModelViewSet):
                       for f in TRACKED_FIELDS},
                 note='Inspeksi baru dibuat',
             )
+            _emit_laporan_notification(inspection, request.user, 'create')
             for f in request.FILES.getlist('photos'):
                 photo = InspectionPhoto.objects.create(inspection=inspection, image=f)
                 InspectionLogAudit.objects.create(
@@ -331,6 +381,7 @@ class InspectionViewSet(viewsets.ModelViewSet):
                 action='delete',
                 note=f'Dipindah ke Tempat Sampah; akan dihapus permanen pada {purge_date}',
             )
+            _emit_laporan_notification(instance, request.user, 'delete')
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated, IsManagerForUsers])
@@ -358,6 +409,7 @@ class InspectionViewSet(viewsets.ModelViewSet):
                 action='restore',
                 note='Laporan dipulihkan dari Tempat Sampah',
             )
+            _emit_laporan_notification(instance, request.user, 'restore')
         return Response(InspectionLogSerializer(instance, context={'request': request}).data)
 
     @action(detail=True, methods=['get'])
@@ -428,6 +480,7 @@ class InspectionViewSet(viewsets.ModelViewSet):
                 diff={'target_log_id': str(amendment.log_id)},
                 note=f'Log ini diamandemen menjadi log {str(amendment.log_id)[:8]}',
             )
+            _emit_laporan_notification(amendment, request.user, 'amend')
             for f in request.FILES.getlist('photos'):
                 photo = InspectionPhoto.objects.create(inspection=amendment, image=f)
                 InspectionLogAudit.objects.create(
@@ -494,6 +547,37 @@ class CurrentUserView(APIView):
 
     def get(self, request):
         return Response(UserSerializer(request.user).data)
+
+
+class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class   = NotificationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return (Notification.objects
+                .filter(recipient=self.request.user)
+                .select_related('actor',
+                                'inspection', 'inspection__asset',
+                                'event', 'event__asset',
+                                'asset'))
+
+    @action(detail=False, methods=['get'])
+    def unread_count(self, request):
+        count = self.get_queryset().filter(read_at__isnull=True).count()
+        return Response({'count': count})
+
+    @action(detail=True, methods=['post'])
+    def mark_read(self, request, pk=None):
+        notif = self.get_object()
+        if notif.read_at is None:
+            notif.read_at = timezone.now()
+            notif.save(update_fields=['read_at'])
+        return Response(NotificationSerializer(notif).data)
+
+    @action(detail=False, methods=['post'])
+    def mark_all_read(self, request):
+        n = self.get_queryset().filter(read_at__isnull=True).update(read_at=timezone.now())
+        return Response({'marked': n})
 
 
 class DashboardSummaryView(APIView):

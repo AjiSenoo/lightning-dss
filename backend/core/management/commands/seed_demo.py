@@ -1,7 +1,7 @@
 from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from core.models import Organization, AssetRegistry, User, InspectionLog, InspectionLogAudit
+from core.models import Organization, AssetRegistry, LightningEvent, Notification, User, InspectionLog, InspectionLogAudit
 
 
 ORG_A = {
@@ -170,6 +170,13 @@ class Command(BaseCommand):
         else:
             self._seed_laporan(teknisi, manager)
 
+        # ── Demo Notifications ───────────────────────────────────────────────
+        if Notification.objects.filter(inspection__catatan_teknisi__startswith='[DEMO]').exists() \
+                or Notification.objects.filter(verb__in=['lightning', 'stale_asset']).exists():
+            self.stdout.write('  Demo notifications already seeded, skipping.')
+        else:
+            self._seed_notifications(teknisi, manager)
+
         self.stdout.write(self.style.SUCCESS(
             f'\nDone! {Organization.objects.count()} orgs, '
             f'{AssetRegistry.objects.count()} assets, '
@@ -298,10 +305,70 @@ class Command(BaseCommand):
         )
         InspectionLogAudit.objects.filter(pk=a4a.pk).update(at=now - timedelta(days=15))
 
-        purge_date = (now - timedelta(days=2) + timedelta(days=49)).date()
+        purge_date = (now - timedelta(days=2) + timedelta(days=7)).date()
         a4b = InspectionLogAudit.objects.create(
             inspection=log4, actor=manager, action='delete',
             note=f'Dipindah ke Tempat Sampah; akan dihapus permanen pada {purge_date}',
         )
         InspectionLogAudit.objects.filter(pk=a4b.pk).update(at=now - timedelta(days=2))
         self.stdout.write('  Created demo log 4: Di Tempat Sampah (Menara BTS Cinere)')
+
+    def _seed_notifications(self, teknisi, manager):
+        now = timezone.now()
+        kilang = AssetRegistry.objects.get(nama_gedung='Kilang Balongan - Unit Distilasi')
+        menara = AssetRegistry.objects.get(nama_gedung='Menara BTS Cinere')
+
+        log1      = InspectionLog.objects.filter(asset=kilang, catatan_teknisi__startswith='[DEMO] Inspeksi rutin').first()
+        log3_orig = InspectionLog.objects.filter(asset__nama_gedung='Tangki LPG Cilacap',
+                                                  catatan_teknisi__contains='Air terminal rusak').first()
+        log4      = InspectionLog.objects.filter(asset=menara, deleted_at__isnull=False).first()
+
+        # ── 3 laporan notifications for manager (2 unread, 1 read) ──────────
+        if log1:
+            n1 = Notification.objects.create(
+                recipient=manager, actor=teknisi, verb='create', inspection=log1,
+            )
+            Notification.objects.filter(pk=n1.pk).update(created_at=now - timedelta(days=3))
+
+        if log3_orig:
+            n2 = Notification.objects.create(
+                recipient=manager, actor=teknisi, verb='create', inspection=log3_orig,
+            )
+            Notification.objects.filter(pk=n2.pk).update(created_at=now - timedelta(days=10))
+
+        if log4:
+            n3 = Notification.objects.create(
+                recipient=manager, actor=teknisi, verb='create', inspection=log4,
+                read_at=now - timedelta(days=14),
+            )
+            Notification.objects.filter(pk=n3.pk).update(created_at=now - timedelta(days=15))
+
+        self.stdout.write('  Created demo laporan notifications for manager (2 unread, 1 read)')
+
+        # ── 1 lightning notification for teknisi ────────────────────────────
+        demo_event, event_created = LightningEvent.objects.get_or_create(
+            asset=kilang,
+            catatan='[DEMO] Kejadian petir terdeteksi selama badai.',
+            defaults={
+                'timestamp': now - timedelta(hours=6),
+                'estimasi_arus_puncak_ka': 85.0,
+                'created_by': manager,
+            },
+        )
+        if event_created:
+            LightningEvent.objects.filter(pk=demo_event.pk).update(created_at=now - timedelta(hours=6))
+
+        n4 = Notification.objects.create(
+            recipient=teknisi, actor=manager, verb='lightning', event=demo_event,
+        )
+        Notification.objects.filter(pk=n4.pk).update(created_at=now - timedelta(hours=6))
+        self.stdout.write('  Created demo lightning notification for teknisi (1 unread)')
+
+        # ── 1 stale-asset notification for manager ───────────────────────────
+        n5 = Notification.objects.create(
+            recipient=manager, actor=None, verb='stale_asset', asset=menara,
+        )
+        Notification.objects.filter(pk=n5.pk).update(created_at=now - timedelta(hours=1))
+        # Rate-limit so a manual check_stale_inspections run respects the cooldown
+        AssetRegistry.objects.filter(pk=menara.pk).update(last_stale_notified_at=now)
+        self.stdout.write('  Created demo stale-asset notification for manager (1 unread)')

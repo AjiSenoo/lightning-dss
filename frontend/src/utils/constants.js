@@ -85,6 +85,16 @@ export const URGENCY_COLORS = {
   'Inspeksi Darurat': STATUS_COLORS.bahaya,
 }
 
+export const timeAgo = (iso) => {
+  if (!iso) return '—'
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000
+  if (diff < 60)    return 'baru saja'
+  if (diff < 3600)  return `${Math.floor(diff / 60)}m lalu`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}j lalu`
+  if (diff < 7 * 86400) return `${Math.floor(diff / 86400)}h lalu`
+  return formatDate(iso)
+}
+
 export const formatDate = (dateStr) => {
   if (!dateStr) return '—'
   return new Date(dateStr).toLocaleDateString('id-ID', {

@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
-from .models import AssetRegistry, LightningEvent, InspectionLog, InspectionLogAudit, InspectionPhoto, User, Organization
+from .models import AssetRegistry, LightningEvent, InspectionLog, InspectionLogAudit, InspectionPhoto, Notification, User, Organization
 
 
 @admin.register(Organization)
@@ -43,6 +43,13 @@ class InspectionLogAuditAdmin(admin.ModelAdmin):
 class InspectionPhotoAdmin(admin.ModelAdmin):
     list_display = ['inspection', 'image', 'caption', 'uploaded_at']
     readonly_fields = ['photo_id', 'uploaded_at']
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ['recipient', 'actor', 'verb', 'inspection', 'read_at', 'created_at']
+    list_filter = ['verb', 'read_at']
+    readonly_fields = ['notif_id', 'created_at']
 
 
 @admin.register(User)
