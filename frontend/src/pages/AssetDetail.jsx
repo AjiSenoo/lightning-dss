@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+
 import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer } from 'recharts'
 import StrikeChart from '../components/StrikeChart'
 import HealthTrend from '../components/HealthTrend'
@@ -7,12 +8,45 @@ import { HealthGaugeInline } from '../components/HealthGauge'
 import { UrgencyBadge } from '../components/StatusBadge'
 import AssetForm from '../components/AssetForm'
 import FuzzyVisualizer from '../components/FuzzyVisualizer'
-import { LPL_LABELS, URGENCY_ACTIONS, formatDate, formatDateTime, getHealthStatus } from '../utils/constants'
+import { LPL_LABELS, URGENCY_ACTIONS, formatDate, formatDateTime, getHealthStatus, timeAgo } from '../utils/constants'
 import cacheStore from '../offline/cacheStore'
 import client from '../api/client'
 import { useAuth, useIsManager } from '../auth/AuthContext'
 
 const GRACE_MS = 5 * 60 * 1000
+
+const AUDIT_DOT = {
+  create:  'bg-green-500',
+  update:  'bg-blue-500',
+  delete:  'bg-red-400',
+  restore: 'bg-brand-500',
+  purge:   'bg-gray-400',
+}
+
+const AUDIT_LABEL = {
+  create:  'menambahkan aset',
+  update:  'mengedit aset',
+  delete:  'memindah ke Tempat Sampah',
+  restore: 'memulihkan aset',
+  purge:   'menghapus permanen',
+}
+
+function DiffPreview({ diff }) {
+  const entries = Object.entries(diff).filter(([, v]) => v && typeof v === 'object' && 'old' in v)
+  if (entries.length === 0) return null
+  return (
+    <ul className="mt-1 space-y-0.5">
+      {entries.map(([field, { old: o, new: n }]) => (
+        <li key={field} className="text-xs text-gray-500">
+          <span className="font-medium text-gray-600">{field}:</span>{' '}
+          <span className="line-through text-red-400">{o ?? '—'}</span>
+          {' → '}
+          <span className="text-green-600">{n ?? '—'}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 function IUIExplainer({ asset, latestEvent }) {
   const [open, setOpen] = useState(false)
@@ -171,18 +205,22 @@ export default function AssetDetail() {
   const { user } = useAuth()
   const [asset, setAsset] = useState(null)
   const [history, setHistory] = useState([])
+  const [audits, setAudits] = useState([])
   const [loading, setLoading] = useState(true)
   const [showEdit, setShowEdit] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [restoring, setRestoring] = useState(false)
 
   const load = async () => {
     setLoading(true)
-    const [assetResult, histResult] = await Promise.all([
+    const [assetResult, histResult, auditRes] = await Promise.all([
       cacheStore.getAsset(id),
       cacheStore.getAssetHistory(id),
+      client.get(`/assets/${id}/audits/`).catch(() => ({ data: [] })),
     ])
     setAsset(assetResult.data)
     setHistory(histResult.data || [])
+    setAudits(auditRes.data || [])
     setLoading(false)
   }
 
@@ -193,15 +231,26 @@ export default function AssetDetail() {
 
   const handleDelete = async () => {
     if (!confirm(
-      `Hapus aset "${asset.nama_gedung}"? Semua kejadian sambaran dan logbook inspeksi terkait akan ikut terhapus secara permanen.`
+      `Pindahkan aset "${asset.nama_gedung}" ke Tempat Sampah?\n\nAset bisa dipulihkan kembali. Inspeksi dan kejadian sambaran yang terhubung tetap utuh.`
     )) return
     setDeleting(true)
     try {
       await client.delete(`/assets/${id}/`)
       navigate('/assets', { replace: true })
     } catch (err) {
-      alert('Gagal menghapus aset: ' + (err?.response?.data?.detail || err.message))
+      alert('Gagal memindah aset: ' + (err?.response?.data?.detail || err.message))
       setDeleting(false)
+    }
+  }
+
+  const handleRestore = async () => {
+    setRestoring(true)
+    try {
+      await client.post(`/assets/${id}/restore/`)
+      load()
+    } catch (err) {
+      alert('Gagal memulihkan aset: ' + (err?.response?.data?.detail || err.message))
+      setRestoring(false)
     }
   }
 
@@ -225,19 +274,37 @@ export default function AssetDetail() {
         <h1 className="text-xl font-bold text-gray-900 truncate flex-1 min-w-0">{asset.nama_gedung}</h1>
         {isManager && (
           <div className="flex gap-2">
-            <button className="btn-secondary text-sm" onClick={() => setShowEdit(true)}>
-              Edit
-            </button>
-            <button
-              className="text-sm bg-red-50 hover:bg-red-100 text-red-700 px-3 py-2 rounded-lg font-medium disabled:opacity-50"
-              onClick={handleDelete}
-              disabled={deleting}
-            >
-              {deleting ? 'Menghapus...' : 'Hapus'}
-            </button>
+            {asset.deleted_at ? (
+              <button
+                className="btn-primary text-sm disabled:opacity-50"
+                onClick={handleRestore}
+                disabled={restoring}
+              >
+                {restoring ? 'Memulihkan...' : '↩ Pulihkan'}
+              </button>
+            ) : (
+              <>
+                <button className="btn-secondary text-sm" onClick={() => setShowEdit(true)}>
+                  Edit
+                </button>
+                <button
+                  className="text-sm bg-red-50 hover:bg-red-100 text-red-700 px-3 py-2 rounded-lg font-medium disabled:opacity-50"
+                  onClick={handleDelete}
+                  disabled={deleting}
+                >
+                  {deleting ? 'Memindah...' : 'Hapus'}
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
+
+      {asset.deleted_at && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700 flex items-center gap-2">
+          🗑️ <span>Aset ini ada di <strong>Tempat Sampah</strong> — dipindah oleh <strong>{asset.deleted_by_nama || asset.deleted_by_username || 'Manajer'}</strong> · {timeAgo(asset.deleted_at)}</span>
+        </div>
+      )}
 
       {showEdit && (
         <AssetForm
@@ -407,6 +474,31 @@ export default function AssetDetail() {
       </div>
 
       <IUIExplainer asset={asset} latestEvent={events[0]} />
+
+      {/* Audit timeline */}
+      <div className="card">
+        <h2 className="text-lg font-bold text-gray-800 mb-4">Riwayat Perubahan</h2>
+        {audits.length === 0 ? (
+          <p className="text-gray-400 text-sm">Belum ada perubahan tercatat.</p>
+        ) : (
+          <ul className="space-y-3">
+            {audits.map((a) => (
+              <li key={a.audit_id} className="flex gap-3 items-start">
+                <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${AUDIT_DOT[a.action] || 'bg-gray-400'}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm">
+                    <span className="font-medium text-gray-800">{a.actor_nama || a.actor_username || 'Sistem'}</span>{' '}
+                    <span className="text-gray-600">{AUDIT_LABEL[a.action] || a.action}</span>
+                    {a.note && <span className="text-gray-500"> — {a.note}</span>}
+                  </p>
+                  {a.diff && <DiffPreview diff={a.diff} />}
+                  <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(a.created_at)}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   )
 }

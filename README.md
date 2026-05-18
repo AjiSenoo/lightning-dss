@@ -43,14 +43,82 @@ This 5:1 ratio reflects reality: damage accumulates faster than recovery.
 
 ---
 
+## Features
+
+### Roles
+
+Two roles are enforced throughout the system:
+
+| Role | Capabilities |
+|------|-------------|
+| **Teknisi** | Submit inspections, log lightning events, view all data for their org |
+| **Manajer** | All Teknisi capabilities + manage assets, manage users, verify inspections, soft-delete/restore, access trash |
+
+### Asset Management (Manajer only — full CRUD with audit parity)
+
+- **Create/Edit** assets via modal form: name, GPS, LPL grade (I–IV), installation year, conductor material, soil resistivity, notes
+- **Soft-delete + Trash + Restore** — "Hapus" moves assets to Tempat Sampah (recoverable); hard-delete is blocked while any inspection or event still references the asset
+- **Audit trail** — every create/edit/delete/restore writes an `AssetAudit` row with field-level diff; visible as "Riwayat Perubahan" timeline on the asset detail page
+- **Notifications** — all org users receive in-app notifications on asset create/update/delete/restore
+
+### Inspection Logs (Laporan)
+
+- Teknisi submits inspections with required (air terminal, down conductor, grounding) and optional (SPD, bonding, cable) component statuses plus photos
+- **5-minute grace window** for the submitter to freely edit their own log
+- **Amendment chain** — after the grace window, correcting a log creates a new linked amendment log (preserving the original)
+- **Full audit trail** via `InspectionLogAudit`: every create/edit/photo/amend/delete/restore/verify/request_revision action is recorded with field-level diffs
+- **Soft-delete + Trash + Restore** — deleted logs are held for 7 days before auto-purge; restorable by Manajer
+
+### Manager Verification (Verifikasi)
+
+Post-hoc, irreversible verification system for inspection logs:
+
+| State | Description |
+|-------|-------------|
+| **Belum Diverifikasi** | Default; submitter can amend after grace |
+| **Revisi Diminta** | Manager requested changes (with note); teknisi can amend |
+| **Terverifikasi** | **Terminal** — manager confirmed the log is correct; cannot be undone |
+
+Key invariants:
+- Verification is **permanent** — there is no "unverify" action
+- Once verified, the teknisi (original submitter) is **locked out** of editing or amending the log
+- Managers can still edit/amend verified logs (producing an "Edited after verification" warning chip in the UI)
+- The `edited_after_verification` flag surfaces as a visible amber chip so reviewers know the stamp may not reflect the latest content
+- `POST /api/inspections/:id/verify/` → 409 if already verified or in trash
+- `POST /api/inspections/:id/request_revision/` → 409 if verified; requires a non-empty note
+
+### Notification System
+
+Real-time in-app notification bell (polled every 30 s):
+- Inspection create/edit/amend/delete/restore → managers notified
+- Manager verify/request_revision → log submitter notified
+- Lightning event recorded → teknisi in the org notified
+- Stale asset (overdue for inspection) → managers notified (with cooldown)
+- Asset create/edit/delete/restore → all org users notified
+
+### Offline Support
+
+Designed for remote industrial sites with unreliable connectivity:
+- Events and inspections are queued in **IndexedDB** when offline
+- A **30-second sync loop** uploads queued items when connectivity returns
+- A **3×3 discrete lookup table** provides approximate urgency estimates offline
+- Network status is checked via a 15-second ping to `/api/health/`
+
+---
+
 ## Architecture
 
 ```
 lightning-dss/
 ├── backend/                  # Django 4.2 + Django REST Framework
 │   ├── config/               # Settings, URLs, WSGI
-│   ├── core/                 # Models, serializers, views, admin
-│   │   └── management/commands/seed_demo.py
+│   ├── core/                 # Models, serializers, views, admin, permissions
+│   │   ├── models.py         # AssetRegistry, AssetAudit, InspectionLog,
+│   │   │                     # InspectionLogAudit, LightningEvent,
+│   │   │                     # Notification, User, Organization
+│   │   └── management/commands/
+│   │       ├── seed_demo.py            # Demo data for 2 orgs, 5 assets, users, logs
+│   │       └── check_stale_inspections.py  # Cron: notify on overdue assets
 │   └── fuzzy_engine/         # Mamdani fuzzy inference system
 │       ├── fuzzy_config.py   # All thresholds and membership function params
 │       ├── health_index.py   # Asset Health Index (AHI) calculation
@@ -59,11 +127,14 @@ lightning-dss/
 └── frontend/                 # React 18 + Vite + Tailwind CSS
     └── src/
         ├── api/              # Axios client
-        ├── components/       # Layout, AssetMap, FuzzyVisualizer, charts
+        ├── auth/             # AuthContext, ProtectedRoute, ManagerOnly
+        ├── components/       # Layout, AssetForm, AssetMap, VerificationChip,
+        │                     # NotificationBell, FuzzyVisualizer, charts
         ├── hooks/            # useNetworkStatus, useOfflineSubmit
         ├── offline/          # IndexedDB store, sync queue, fuzzy lookup table
-        ├── pages/            # Dashboard, AssetPortfolio, AssetDetail,
-        │                     # EventInput, LogbookForm, Recommendation
+        ├── pages/            # Dashboard, AssetPortfolio, AssetDetail, AssetTrash,
+        │                     # EventInput, LogbookForm, InspectionReport,
+        │                     # LaporanDetail, LaporanTrash, UserManagement
         └── utils/            # Constants, formatters
 ```
 
@@ -74,6 +145,7 @@ lightning-dss/
 | Backend | Django 4.2, Django REST Framework |
 | Fuzzy Engine | scikit-fuzzy (Mamdani), NumPy |
 | Database | SQLite (dev) / PostgreSQL (prod via `DATABASE_URL`) |
+| Auth | JWT (djangorestframework-simplejwt) |
 | Frontend | React 18, Vite, Tailwind CSS |
 | Charts | Recharts |
 | Map | React-Leaflet |
@@ -99,7 +171,7 @@ This will:
 1. Create a Python virtual environment
 2. Install all dependencies
 3. Run Django migrations
-4. Seed 5 demo assets
+4. Seed demo data (2 orgs, 5 assets, 4 users, sample logs + notifications)
 5. Start the dev server at **http://localhost:8000**
 
 ### Frontend
@@ -121,6 +193,10 @@ This will:
 | `W_CUMULATIVE_STRESS` | `0.50` | AHI weight for cumulative strike stress |
 | `W_PHYSICAL_CONDITION` | `0.30` | AHI weight for physical component condition |
 | `W_CALENDAR_AGE` | `0.20` | AHI weight for installation age |
+| `INSPECTION_EDIT_GRACE_MINUTES` | `5` | Minutes a teknisi can freely edit their own log |
+| `INSPECTION_DELETE_GRACE_DAYS` | `7` | Days before a soft-deleted inspection is auto-purged |
+| `INSPECTION_STALE_THRESHOLD_DAYS` | `90` | Days without inspection before asset is flagged stale |
+| `STALE_NOTIFY_COOLDOWN_DAYS` | `7` | Minimum days between repeat stale notifications per asset |
 
 > The three AHI weights must sum to `1.0`. The fuzzy engine asserts this on import and fails fast if misconfigured.
 
@@ -128,40 +204,79 @@ This will:
 
 ## Key API Endpoints
 
+### Assets
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/assets/` | List all assets with health scores |
-| `POST` | `/api/events/` | Log a lightning strike → triggers fuzzy inference |
-| `POST` | `/api/inspections/` | Submit inspection log → triggers feedback loop |
-| `GET` | `/api/fuzzy/simulate/?r_stress=X&d_asset=Y` | Interactive fuzzy simulation |
+| `GET` | `/api/assets/` | List active assets (excludes trashed) |
+| `POST` | `/api/assets/` | Create asset (Manajer only) |
+| `GET/PUT/PATCH` | `/api/assets/:id/` | Retrieve / update asset |
+| `DELETE` | `/api/assets/:id/` | Soft-delete to trash (Manajer only) |
+| `POST` | `/api/assets/:id/restore/` | Restore from trash (Manajer only) |
+| `GET` | `/api/assets/trash/` | List trashed assets (Manajer only) |
+| `GET` | `/api/assets/:id/audits/` | Asset change history |
+| `GET` | `/api/assets/:id/history/` | Interleaved events + inspections timeline |
+
+### Inspections
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/inspections/` | List active logs (supports filters: asset, from, to, issues_only, verification) |
+| `POST` | `/api/inspections/` | Submit inspection log |
+| `GET/PUT/PATCH` | `/api/inspections/:id/` | Retrieve / edit within grace |
+| `DELETE` | `/api/inspections/:id/` | Soft-delete (Manajer only) |
+| `POST` | `/api/inspections/:id/amend/` | Submit amendment log |
+| `POST` | `/api/inspections/:id/restore/` | Restore from trash (Manajer only) |
+| `GET` | `/api/inspections/trash/` | List trashed logs (Manajer only) |
+| `GET` | `/api/inspections/:id/audit_trail/` | Full audit history |
+| `POST` | `/api/inspections/:id/verify/` | Verify log — permanent (Manajer only) |
+| `POST` | `/api/inspections/:id/request_revision/` | Request revision with note (Manajer only) |
+
+### Other
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/events/` | Log lightning strike → fuzzy inference |
 | `POST` | `/api/events/batch/` | Offline sync — bulk event upload |
 | `POST` | `/api/inspections/batch/` | Offline sync — bulk inspection upload |
+| `GET` | `/api/fuzzy/simulate/` | Interactive fuzzy simulation |
+| `GET` | `/api/dashboard/summary/` | Org-level KPI summary |
+| `GET` | `/api/notifications/` | Paginated notifications |
+| `POST` | `/api/notifications/:id/mark_read/` | Mark notification as read |
+| `POST` | `/api/notifications/mark_all_read/` | Mark all notifications as read |
 | `GET` | `/api/health/` | Ping for offline detection |
 
 ---
 
-## Demo Assets
+## Demo Credentials
 
-Five pre-seeded assets covering different LPL grades and soil conditions:
+Two organizations, four users:
 
-| Asset | LPL | Notes |
-|-------|-----|-------|
-| Kilang Balongan - Unit Distilasi | I | High-risk petrochemical |
-| Menara BTS Cinere | IV | Soil 8.5 Ω·m → corrosion penalty |
-| Gardu Induk PLN Suralaya | II | Power substation |
-| Gedung Lab STEI ITB | III | Research facility |
-| Tangki LPG Cilacap | I | Soil 6.0 Ω·m → corrosion penalty |
+| Org | Role | Username | Password |
+|-----|------|----------|----------|
+| Pertamina Group | Manajer | `manager` | `manager123` |
+| Pertamina Group | Teknisi | `teknisi` | `teknisi123` |
+| PLN & Institusi | Manajer | `manager2` | `manager456` |
+| PLN & Institusi | Teknisi | `teknisi2` | `teknisi456` |
 
----
+### Demo Assets (5 total)
 
-## Offline Support
+| Asset | Org | LPL | Notes |
+|-------|-----|-----|-------|
+| Kilang Balongan - Unit Distilasi | Pertamina | I | High-risk petrochemical |
+| Tangki LPG Cilacap | Pertamina | I | Soil 6.0 Ω·m → corrosion penalty |
+| Menara BTS Cinere | Pertamina | IV | Soil 8.5 Ω·m → corrosion penalty |
+| Gardu Induk PLN Suralaya | PLN | II | Power substation |
+| Gedung Lab STEI ITB | PLN | III | Research facility |
 
-The system is designed for use in remote industrial areas with unreliable connectivity:
+### Demo Laporan State (Pertamina)
 
-- Events and inspections are queued in **IndexedDB** when offline
-- A **30-second sync loop** uploads queued items when connectivity returns
-- A **3×3 discrete lookup table** provides approximate urgency estimates while offline
-- Network status is checked via a 15-second ping to `/api/health/`
+| Log | Status | Notes |
+|-----|--------|-------|
+| Log 1 (Kilang Balongan) | **Terverifikasi** | Verified by manager, 3 days ago |
+| Log 2 (Kilang Balongan) | **Revisi Diminta** | Manager requested photo of grounding connection |
+| Log 3 (Tangki LPG) | Original + amendment | Manager-submitted amendment correcting grounding resistance |
+| Log 4 (Menara BTS) | **Di Tempat Sampah** | Soft-deleted, available for restore |
 
 ---
 

@@ -10,12 +10,12 @@ from rest_framework.views import APIView
 
 from django.conf import settings
 from django.shortcuts import get_object_or_404
-from .models import AssetRegistry, LightningEvent, InspectionLog, InspectionLogAudit, InspectionPhoto, Notification, User, Organization
+from .models import AssetRegistry, AssetAudit, LightningEvent, InspectionLog, InspectionLogAudit, InspectionPhoto, Notification, User, Organization
 from .permissions import (
     IsManagerForAssets, IsManagerForUsers, IsOwnerOrManagerWithGrace,
 )
 from .serializers import (
-    AssetRegistrySerializer, LightningEventSerializer,
+    AssetRegistrySerializer, AssetAuditSerializer, LightningEventSerializer,
     InspectionLogSerializer, InspectionLogAuditSerializer, NotificationSerializer,
     UserSerializer, OrganizationSerializer,
     DashboardSummarySerializer, AssetMapSerializer,
@@ -98,6 +98,19 @@ def _emit_lightning_broadcast(event):
         Notification.objects.bulk_create(rows)
 
 
+def _emit_asset_notification(asset, actor, verb):
+    """Notify all active users in the asset's org (except the actor) about an asset change."""
+    org = asset.organization
+    qs = User.objects.filter(is_active=True)
+    if org:
+        qs = qs.filter(organization=org)
+    if actor:
+        qs = qs.exclude(pk=actor.pk)
+    rows = [Notification(recipient=r, actor=actor, verb=verb, asset=asset) for r in qs]
+    if rows:
+        Notification.objects.bulk_create(rows)
+
+
 class OrganizationViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = OrganizationSerializer
     permission_classes = [IsAuthenticated]
@@ -115,7 +128,9 @@ class AssetViewSet(viewsets.ModelViewSet):
     permission_classes = [IsManagerForAssets]
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = AssetRegistry.objects.all()
+        if self.request.query_params.get('include_deleted') != 'true':
+            qs = qs.filter(deleted_at__isnull=True)
         org = _user_org(self.request)
         if org:
             qs = qs.filter(organization=org)
@@ -126,7 +141,98 @@ class AssetViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         org = _user_org(self.request)
-        serializer.save(organization=org)
+        asset = serializer.save(organization=org)
+        AssetAudit.objects.create(
+            asset=asset, actor=self.request.user, action='create',
+            diff={'nama_gedung': asset.nama_gedung, 'lpl_grade': asset.lpl_grade},
+            note='Aset baru ditambahkan',
+        )
+        _emit_asset_notification(asset, self.request.user, 'asset_create')
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        if instance.deleted_at is not None:
+            return Response(
+                {'detail': 'Aset di Tempat Sampah harus dipulihkan dulu sebelum diedit.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        tracked = [
+            'nama_gedung', 'lokasi_gps', 'lpl_grade', 'tahun_instalasi',
+            'jenis_material_konduktor', 'resistivitas_tanah', 'catatan',
+            'skor_kesehatan_aset',
+        ]
+        diff = {}
+        for f in tracked:
+            old = getattr(instance, f)
+            new = serializer.validated_data.get(f, old)
+            if old != new:
+                diff[f] = {'old': str(old) if old is not None else None,
+                            'new': str(new) if new is not None else None}
+        with transaction.atomic():
+            updated = serializer.save()
+            if diff:
+                AssetAudit.objects.create(
+                    asset=updated, actor=request.user, action='update',
+                    diff=diff, note='Aset diedit oleh Manajer',
+                )
+                _emit_asset_notification(updated, request.user, 'asset_update')
+        return Response(AssetRegistrySerializer(updated).data)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.deleted_at is not None:
+            return Response(
+                {'detail': 'Aset sudah di Tempat Sampah.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        with transaction.atomic():
+            instance.deleted_at = timezone.now()
+            instance.deleted_by = request.user
+            instance.save(update_fields=['deleted_at', 'deleted_by'])
+            AssetAudit.objects.create(
+                asset=instance, actor=request.user, action='delete',
+                note='Aset dipindah ke Tempat Sampah',
+            )
+            _emit_asset_notification(instance, request.user, 'asset_delete')
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated, IsManagerForUsers])
+    def trash(self, request):
+        org = _user_org(request)
+        qs = AssetRegistry.objects.filter(deleted_at__isnull=False)
+        if org:
+            qs = qs.filter(organization=org)
+        qs = qs.select_related('deleted_by').order_by('-deleted_at')
+        page = self.paginate_queryset(qs)
+        serializer = AssetRegistrySerializer(page or qs, many=True, context={'request': request})
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsManagerForUsers])
+    def restore(self, request, pk=None):
+        org = _user_org(request)
+        base_qs = AssetRegistry.objects.filter(organization=org) if org else AssetRegistry.objects.all()
+        instance = get_object_or_404(base_qs, pk=pk, deleted_at__isnull=False)
+        with transaction.atomic():
+            instance.deleted_at = None
+            instance.deleted_by = None
+            instance.save(update_fields=['deleted_at', 'deleted_by'])
+            AssetAudit.objects.create(
+                asset=instance, actor=request.user, action='restore',
+                note='Aset dipulihkan dari Tempat Sampah',
+            )
+            _emit_asset_notification(instance, request.user, 'asset_restore')
+        return Response(AssetRegistrySerializer(instance).data)
+
+    @action(detail=True, methods=['get'])
+    def audits(self, request, pk=None):
+        asset = self.get_object()
+        qs = asset.audits.select_related('actor').order_by('created_at')
+        return Response(AssetAuditSerializer(qs, many=True).data)
 
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):

@@ -50,9 +50,14 @@ export default function AssetPortfolio() {
             </span>
           )}
           {isManager && (
-            <button className="btn-primary" onClick={() => setShowCreate(true)}>
-              + Aset Baru
-            </button>
+            <>
+              <button className="btn-secondary text-sm" onClick={() => navigate('/assets/trash')}>
+                🗑️ Tempat Sampah
+              </button>
+              <button className="btn-primary" onClick={() => setShowCreate(true)}>
+                + Aset Baru
+              </button>
+            </>
           )}
         </div>
       </div>

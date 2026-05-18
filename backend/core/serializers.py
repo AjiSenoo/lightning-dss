@@ -1,7 +1,7 @@
 from datetime import timedelta
 from django.conf import settings
 from rest_framework import serializers
-from .models import AssetRegistry, LightningEvent, InspectionLog, InspectionPhoto, InspectionLogAudit, Notification, User, Organization
+from .models import AssetRegistry, AssetAudit, LightningEvent, InspectionLog, InspectionPhoto, InspectionLogAudit, Notification, User, Organization
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -41,11 +41,13 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class AssetRegistrySerializer(serializers.ModelSerializer):
-    kapasitas_desain_ka = serializers.IntegerField(read_only=True)
-    organization_nama = serializers.CharField(source='organization.nama', read_only=True)
-    d_asset = serializers.SerializerMethodField()
-    latest_event = serializers.SerializerMethodField()
-    latest_inspection_date = serializers.SerializerMethodField()
+    kapasitas_desain_ka     = serializers.IntegerField(read_only=True)
+    organization_nama       = serializers.CharField(source='organization.nama', read_only=True)
+    deleted_by_nama         = serializers.CharField(source='deleted_by.nama_lengkap', read_only=True)
+    deleted_by_username     = serializers.CharField(source='deleted_by.username', read_only=True)
+    d_asset                 = serializers.SerializerMethodField()
+    latest_event            = serializers.SerializerMethodField()
+    latest_inspection_date  = serializers.SerializerMethodField()
 
     class Meta:
         model = AssetRegistry
@@ -53,9 +55,15 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
             'asset_id', 'organization', 'organization_nama', 'nama_gedung', 'lokasi_gps', 'lpl_grade',
             'kapasitas_desain_ka', 'tahun_instalasi', 'skor_kesehatan_aset',
             'jenis_material_konduktor', 'resistivitas_tanah', 'catatan',
-            'created_at', 'updated_at', 'd_asset', 'latest_event', 'latest_inspection_date',
+            'created_at', 'updated_at',
+            'deleted_at', 'deleted_by', 'deleted_by_nama', 'deleted_by_username',
+            'd_asset', 'latest_event', 'latest_inspection_date',
         ]
-        read_only_fields = ['asset_id', 'kapasitas_desain_ka', 'organization_nama', 'created_at', 'updated_at']
+        read_only_fields = [
+            'asset_id', 'kapasitas_desain_ka', 'organization_nama',
+            'created_at', 'updated_at',
+            'deleted_by_nama', 'deleted_by_username',
+        ]
 
     def get_d_asset(self, obj):
         return round(1.0 - obj.skor_kesehatan_aset, 4)
@@ -181,6 +189,20 @@ class InspectionLogAuditSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class AssetAuditSerializer(serializers.ModelSerializer):
+    actor_nama     = serializers.CharField(source='actor.nama_lengkap', read_only=True)
+    actor_username = serializers.CharField(source='actor.username',     read_only=True)
+    actor_role     = serializers.CharField(source='actor.role',         read_only=True)
+
+    class Meta:
+        model  = AssetAudit
+        fields = [
+            'audit_id', 'asset', 'actor', 'actor_nama', 'actor_username',
+            'actor_role', 'action', 'diff', 'note', 'created_at',
+        ]
+        read_only_fields = fields
+
+
 class NotificationSerializer(serializers.ModelSerializer):
     actor_nama     = serializers.CharField(source='actor.nama_lengkap', read_only=True)
     actor_username = serializers.CharField(source='actor.username',     read_only=True)
@@ -215,6 +237,8 @@ class NotificationSerializer(serializers.ModelSerializer):
         if obj.event_id:
             return f'/assets/{obj.event.asset_id}'
         if obj.asset_id:
+            if obj.verb == 'asset_delete':
+                return '/assets/trash'
             return f'/assets/{obj.asset_id}'
         return '/'
 

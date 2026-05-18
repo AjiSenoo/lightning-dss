@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
-from .models import AssetRegistry, LightningEvent, InspectionLog, InspectionLogAudit, InspectionPhoto, Notification, User, Organization
+from .models import AssetRegistry, AssetAudit, LightningEvent, InspectionLog, InspectionLogAudit, InspectionPhoto, Notification, User, Organization
 
 
 @admin.register(Organization)
@@ -12,10 +12,17 @@ class OrganizationAdmin(admin.ModelAdmin):
 
 @admin.register(AssetRegistry)
 class AssetRegistryAdmin(admin.ModelAdmin):
-    list_display = ['nama_gedung', 'organization', 'lpl_grade', 'skor_kesehatan_aset', 'tahun_instalasi', 'updated_at']
-    list_filter = ['lpl_grade', 'organization']
+    list_display = ['nama_gedung', 'organization', 'lpl_grade', 'skor_kesehatan_aset', 'tahun_instalasi', 'updated_at', 'deleted_at']
+    list_filter = ['lpl_grade', 'organization', ('deleted_at', admin.EmptyFieldListFilter)]
     search_fields = ['nama_gedung']
     readonly_fields = ['asset_id', 'kapasitas_desain_ka', 'created_at', 'updated_at']
+
+
+@admin.register(AssetAudit)
+class AssetAuditAdmin(admin.ModelAdmin):
+    list_display = ['asset', 'action', 'actor', 'created_at']
+    list_filter = ['action']
+    readonly_fields = ['audit_id', 'created_at']
 
 
 @admin.register(LightningEvent)

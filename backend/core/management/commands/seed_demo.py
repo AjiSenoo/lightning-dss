@@ -1,7 +1,7 @@
 from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from core.models import Organization, AssetRegistry, LightningEvent, Notification, User, InspectionLog, InspectionLogAudit
+from core.models import Organization, AssetRegistry, AssetAudit, LightningEvent, Notification, User, InspectionLog, InspectionLogAudit
 
 
 ORG_A = {
@@ -151,6 +151,12 @@ class Command(BaseCommand):
             if not created and asset.organization_id != org_a.pk:
                 asset.organization = org_a
                 asset.save()
+            if created:
+                AssetAudit.objects.create(
+                    asset=asset, actor=manager, action='create',
+                    diff={'nama_gedung': asset.nama_gedung, 'lpl_grade': asset.lpl_grade},
+                    note='Aset baru ditambahkan',
+                )
             self.stdout.write(f'  {"Created" if created else "Exists"} asset [{org_a.nama}]: {asset.nama_gedung}')
 
         # Assets — Org B
@@ -162,6 +168,12 @@ class Command(BaseCommand):
             if not created and asset.organization_id != org_b.pk:
                 asset.organization = org_b
                 asset.save()
+            if created:
+                AssetAudit.objects.create(
+                    asset=asset, actor=manager2, action='create',
+                    diff={'nama_gedung': asset.nama_gedung, 'lpl_grade': asset.lpl_grade},
+                    note='Aset baru ditambahkan',
+                )
             self.stdout.write(f'  {"Created" if created else "Exists"} asset [{org_b.nama}]: {asset.nama_gedung}')
 
         # ── Demo Laporan ────────────────────────────────────────────────────────

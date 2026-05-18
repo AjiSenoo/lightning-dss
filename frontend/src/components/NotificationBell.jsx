@@ -13,6 +13,10 @@ const VERB_LABELS = {
   stale_asset:      'Aset belum diinspeksi:',
   verify:           'memverifikasi laporan di',
   request_revision: 'meminta revisi laporan di',
+  asset_create:     'menambahkan aset baru:',
+  asset_update:     'mengedit aset:',
+  asset_delete:     'memindah aset ke Tempat Sampah:',
+  asset_restore:    'memulihkan aset dari Tempat Sampah:',
 }
 
 function renderText(notif) {

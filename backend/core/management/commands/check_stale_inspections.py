@@ -18,7 +18,7 @@ class Command(BaseCommand):
 
         total = 0
         with transaction.atomic():
-            for asset in AssetRegistry.objects.select_related('organization').all():
+            for asset in AssetRegistry.objects.filter(deleted_at__isnull=True).select_related('organization'):
                 latest = (asset.inspections
                           .filter(deleted_at__isnull=True)
                           .order_by('-tgl_inspeksi')

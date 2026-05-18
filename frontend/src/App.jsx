@@ -6,6 +6,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import AssetPortfolio from './pages/AssetPortfolio'
 import AssetDetail from './pages/AssetDetail'
+import AssetTrash from './pages/AssetTrash'
 import EventInput from './pages/EventInput'
 import LogbookForm from './pages/LogbookForm'
 import InspectionReport from './pages/InspectionReport'
@@ -46,6 +47,7 @@ export default function App() {
           >
             <Route index element={<Dashboard />} />
             <Route path="assets" element={<AssetPortfolio />} />
+            <Route path="assets/trash" element={<ManagerOnly><AssetTrash /></ManagerOnly>} />
             <Route path="assets/:id" element={<AssetDetail />} />
             <Route path="events/new" element={<EventInput />} />
             <Route path="inspections" element={<InspectionReport />} />

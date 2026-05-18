@@ -92,6 +92,11 @@ class AssetRegistry(models.Model):
     last_stale_notified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    deleted_by = models.ForeignKey(
+        'User', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='assets_deleted'
+    )
 
     def save(self, *args, **kwargs):
         self.kapasitas_desain_ka = LPL_CAPACITY_MAP.get(self.lpl_grade, 100)
@@ -107,7 +112,7 @@ class AssetRegistry(models.Model):
 
 class LightningEvent(models.Model):
     event_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    asset = models.ForeignKey(AssetRegistry, on_delete=models.CASCADE, related_name='events')
+    asset = models.ForeignKey(AssetRegistry, on_delete=models.PROTECT, related_name='events')
     timestamp = models.DateTimeField()
     estimasi_arus_puncak_ka = models.FloatField(help_text="Ipeak in kA")
     rasio_stres = models.FloatField(editable=False, default=0.0, help_text="Auto: Ipeak / kapasitas_desain_ka")
@@ -158,7 +163,7 @@ class InspectionLog(models.Model):
     event = models.ForeignKey(
         LightningEvent, on_delete=models.SET_NULL, null=True, blank=True, related_name='inspections'
     )
-    asset = models.ForeignKey(AssetRegistry, on_delete=models.CASCADE, related_name='inspections')
+    asset = models.ForeignKey(AssetRegistry, on_delete=models.PROTECT, related_name='inspections')
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='inspections')
     tgl_inspeksi = models.DateTimeField()
 
@@ -246,6 +251,32 @@ class InspectionLogAudit(models.Model):
         return f'{self.action} on {self.inspection_id} by {self.actor_id}'
 
 
+ASSET_AUDIT_ACTIONS = [
+    ('create',  'Created'),
+    ('update',  'Edited'),
+    ('delete',  'Soft-deleted'),
+    ('restore', 'Restored'),
+    ('purge',   'Hard-deleted'),
+]
+
+
+class AssetAudit(models.Model):
+    audit_id   = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset      = models.ForeignKey(AssetRegistry, on_delete=models.CASCADE, related_name='audits')
+    actor      = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='asset_audit_actions')
+    action     = models.CharField(max_length=20, choices=ASSET_AUDIT_ACTIONS)
+    diff       = models.JSONField(default=dict, blank=True)
+    note       = models.CharField(max_length=300, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'asset_audits'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.action} on {self.asset_id} by {self.actor_id}'
+
+
 class InspectionPhoto(models.Model):
     photo_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     inspection = models.ForeignKey(InspectionLog, on_delete=models.CASCADE, related_name='photos')
@@ -271,6 +302,10 @@ NOTIFICATION_VERBS = [
     ('stale_asset',      'Asset overdue for inspection'),
     ('verify',           'Verified'),
     ('request_revision', 'Revision Requested'),
+    ('asset_create',     'Asset Created'),
+    ('asset_update',     'Asset Edited'),
+    ('asset_delete',     'Asset Soft-deleted'),
+    ('asset_restore',    'Asset Restored'),
 ]
 
 
