@@ -6,6 +6,7 @@ import { useAuth, useIsManager } from '../auth/AuthContext'
 import { formatDateTime } from '../utils/constants'
 import EmptyState from '../components/EmptyState'
 import { SkeletonTable } from '../components/Skeleton'
+import VerificationChip from '../components/VerificationChip'
 
 const GRACE_MS = 5 * 60 * 1000
 
@@ -51,6 +52,7 @@ export default function InspectionReport() {
   const [filterFrom, setFilterFrom] = useState('')
   const [filterTo, setFilterTo] = useState('')
   const [issuesOnly, setIssuesOnly] = useState(false)
+  const [filterVerification, setFilterVerification] = useState('')
   const [search, setSearch] = useState('')
 
   useEffect(() => {
@@ -66,6 +68,7 @@ export default function InspectionReport() {
       if (filterFrom) params.set('from', filterFrom)
       if (filterTo) params.set('to', filterTo)
       if (issuesOnly) params.set('issues_only', 'true')
+      if (filterVerification) params.set('verification', filterVerification)
       const res = await client.get(`/inspections/?${params.toString()}`)
       const data = res.data
       const items = Array.isArray(data) ? data : data.results || []
@@ -85,7 +88,7 @@ export default function InspectionReport() {
   useEffect(() => {
     fetchPage(1)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterAsset, filterFrom, filterTo, issuesOnly])
+  }, [filterAsset, filterFrom, filterTo, issuesOnly, filterVerification])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return logs
@@ -158,15 +161,29 @@ export default function InspectionReport() {
             />
           </div>
         </div>
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              checked={issuesOnly}
-              onChange={(e) => setIssuesOnly(e.target.checked)}
-            />
-            Hanya yang bermasalah (komponen wajib tidak OK)
-          </label>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={issuesOnly}
+                onChange={(e) => setIssuesOnly(e.target.checked)}
+              />
+              Hanya yang bermasalah (komponen wajib tidak OK)
+            </label>
+            <div>
+              <select
+                className="form-input text-sm"
+                value={filterVerification}
+                onChange={(e) => setFilterVerification(e.target.value)}
+              >
+                <option value="">Semua verifikasi</option>
+                <option value="verified">Terverifikasi</option>
+                <option value="revision_requested">Revisi Diminta</option>
+                <option value="pending">Belum Diverifikasi</option>
+              </select>
+            </div>
+          </div>
           <span className="text-xs text-gray-500">{count} log ditemukan</span>
         </div>
       </div>
@@ -198,6 +215,7 @@ export default function InspectionReport() {
                 <th className="py-3 px-4 font-semibold">Dibuat oleh</th>
                 <th className="py-3 px-4 font-semibold">Diedit terakhir</th>
                 <th className="py-3 px-4 font-semibold">Status</th>
+                <th className="py-3 px-4 font-semibold">Verifikasi</th>
                 <th className="py-3 px-4 font-semibold">Foto</th>
                 <th className="py-3 px-4 font-semibold">Catatan</th>
                 <th className="py-3 px-4 font-semibold"></th>
@@ -228,6 +246,12 @@ export default function InspectionReport() {
                         <StatusChip label="DC" value={log.status_down_conductor} />
                         <StatusChip label="GD" value={log.status_grounding} />
                       </div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <VerificationChip
+                        status={log.verification_status}
+                        editedAfter={log.edited_after_verification}
+                      />
                     </td>
                     <td className="py-3 px-4 text-gray-600">{log.photos?.length ? `📷 ${log.photos.length}` : '—'}</td>
                     <td className="py-3 px-4"><AmendmentBadge log={log} /></td>

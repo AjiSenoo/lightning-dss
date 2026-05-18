@@ -247,6 +247,13 @@ class InspectionViewSet(viewsets.ModelViewSet):
                 | ~Q(status_down_conductor='OK')
                 | ~Q(status_grounding='OK')
             )
+        verification = params.get('verification')
+        if verification == 'verified':
+            qs = qs.filter(verified_at__isnull=False)
+        elif verification == 'revision_requested':
+            qs = qs.filter(revision_requested_at__isnull=False, verified_at__isnull=True)
+        elif verification == 'pending':
+            qs = qs.filter(verified_at__isnull=True, revision_requested_at__isnull=True)
         return qs
 
     def update(self, request, *args, **kwargs):
@@ -276,12 +283,21 @@ class InspectionViewSet(viewsets.ModelViewSet):
             updated.save(update_fields=['updated_by', 'updated_at'])
 
             if diff or new_photos:
+                is_post_verify = (
+                    updated.verified_at is not None
+                    and getattr(request.user, 'role', None) == 'Manajer'
+                )
+                audit_note = (
+                    'Log diperbarui oleh Manajer setelah verifikasi'
+                    if is_post_verify
+                    else 'Log diperbarui dalam masa grace'
+                )
                 InspectionLogAudit.objects.create(
                     inspection=updated,
                     actor=request.user,
                     action='update',
                     diff=diff,
-                    note='Log diperbarui dalam masa grace',
+                    note=audit_note,
                 )
                 _emit_laporan_notification(updated, request.user, 'update')
             for f in new_photos:
@@ -412,6 +428,85 @@ class InspectionViewSet(viewsets.ModelViewSet):
             _emit_laporan_notification(instance, request.user, 'restore')
         return Response(InspectionLogSerializer(instance, context={'request': request}).data)
 
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsManagerForUsers])
+    def verify(self, request, pk=None):
+        instance = self.get_object()
+        if instance.deleted_at is not None:
+            return Response(
+                {'detail': 'Tidak dapat memverifikasi laporan di Tempat Sampah.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if instance.verified_at is not None:
+            return Response(
+                {'detail': 'Laporan sudah terverifikasi. Verifikasi tidak dapat diubah.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        had_revision = bool(instance.revision_requested_at)
+        prior_note = instance.revision_request_note
+        with transaction.atomic():
+            instance.verified_at = timezone.now()
+            instance.verified_by = request.user
+            instance.revision_requested_at = None
+            instance.revision_requested_by = None
+            instance.revision_request_note = ''
+            instance.save(update_fields=[
+                'verified_at', 'verified_by',
+                'revision_requested_at', 'revision_requested_by', 'revision_request_note',
+                'updated_at',
+            ])
+            if had_revision:
+                audit_diff = {'resolves_revision': True, 'prior_note': prior_note}
+                audit_note = 'Verifikasi (permanen) — menyelesaikan permintaan revisi'
+            else:
+                audit_diff = {}
+                audit_note = 'Laporan diverifikasi oleh Manajer (permanen)'
+            InspectionLogAudit.objects.create(
+                inspection=instance,
+                actor=request.user,
+                action='verify',
+                diff=audit_diff,
+                note=audit_note,
+            )
+            _emit_laporan_notification(instance, request.user, 'verify')
+        return Response(InspectionLogSerializer(instance).data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsManagerForUsers])
+    def request_revision(self, request, pk=None):
+        instance = self.get_object()
+        if instance.deleted_at is not None:
+            return Response(
+                {'detail': 'Tidak dapat meminta revisi laporan di Tempat Sampah.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if instance.verified_at is not None:
+            return Response(
+                {'detail': 'Laporan sudah terverifikasi dan tidak dapat diminta revisi.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        note = (request.data.get('note') or '').strip()
+        if not note:
+            return Response({'note': ['Catatan revisi wajib diisi.']}, status=status.HTTP_400_BAD_REQUEST)
+        if len(note) > 500:
+            return Response({'note': ['Catatan revisi maksimum 500 karakter.']}, status=status.HTTP_400_BAD_REQUEST)
+        old_note = instance.revision_request_note or None
+        with transaction.atomic():
+            instance.revision_requested_at = timezone.now()
+            instance.revision_requested_by = request.user
+            instance.revision_request_note = note
+            instance.save(update_fields=[
+                'revision_requested_at', 'revision_requested_by', 'revision_request_note', 'updated_at',
+            ])
+            audit_label = 'Catatan revisi diperbarui' if old_note else 'Revisi diminta'
+            InspectionLogAudit.objects.create(
+                inspection=instance,
+                actor=request.user,
+                action='request_revision',
+                diff={'note': {'old': old_note, 'new': note}},
+                note=f'{audit_label}: {note[:120]}',
+            )
+            _emit_laporan_notification(instance, request.user, 'request_revision')
+        return Response(InspectionLogSerializer(instance).data)
+
     @action(detail=True, methods=['get'])
     def audit(self, request, pk=None):
         log = self.get_object()
@@ -427,11 +522,17 @@ class InspectionViewSet(viewsets.ModelViewSet):
         original = self.get_object()
         is_owner = original.user_id == request.user.id
         is_manager = getattr(request.user, 'role', None) == 'Manajer'
-        if not (is_owner or is_manager):
-            return Response(
-                {'detail': 'Only the original submitter or a Manajer may amend this log.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        if not is_manager:
+            if not is_owner:
+                return Response(
+                    {'detail': 'Only the original submitter or a Manajer may amend this log.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if original.verified_at is not None:
+                return Response(
+                    {'detail': 'Laporan sudah terverifikasi. Hanya Manajer yang dapat membuat amandemen.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
         from fuzzy_engine import update_asset_health
 

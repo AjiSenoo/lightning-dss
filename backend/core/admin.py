@@ -27,8 +27,8 @@ class LightningEventAdmin(admin.ModelAdmin):
 
 @admin.register(InspectionLog)
 class InspectionLogAdmin(admin.ModelAdmin):
-    list_display = ['asset', 'tgl_inspeksi', 'status_air_terminal', 'status_down_conductor', 'status_grounding', 'amends', 'deleted_at']
-    list_filter = ['status_air_terminal', 'status_grounding', 'deleted_at']
+    list_display = ['asset', 'tgl_inspeksi', 'status_air_terminal', 'status_down_conductor', 'status_grounding', 'amends', 'verified_at', 'deleted_at']
+    list_filter = ['status_air_terminal', 'status_grounding', ('verified_at', admin.EmptyFieldListFilter), 'deleted_at']
     readonly_fields = ['log_id', 'created_at', 'updated_at']
 
 

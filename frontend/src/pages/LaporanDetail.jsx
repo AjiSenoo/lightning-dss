@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import client from '../api/client'
 import { useAuth, useIsManager } from '../auth/AuthContext'
-import { formatDateTime } from '../utils/constants'
+import { formatDateTime, timeAgo } from '../utils/constants'
 import PhotoGallery from '../components/PhotoGallery'
 import EmptyState from '../components/EmptyState'
 import { SkeletonCard, SkeletonTable } from '../components/Skeleton'
+import VerificationChip from '../components/VerificationChip'
 
 const GRACE_MS = 5 * 60 * 1000
 
@@ -23,14 +24,16 @@ const FIELD_LABELS = {
 }
 
 const ACTION_STYLE = {
-  create:      { bg: 'bg-green-100 text-green-700',  label: 'membuat laporan',               dot: '🟢' },
-  update:      { bg: 'bg-blue-100 text-blue-700',    label: 'mengedit laporan',               dot: '🔵' },
-  amend:       { bg: 'bg-amber-100 text-amber-700',  label: 'membuat amandemen',              dot: '🟡' },
-  amended_by:  { bg: 'bg-amber-100 text-amber-700',  label: 'mengamandemen laporan ini',      dot: '🟡' },
-  photo_added: { bg: 'bg-gray-100 text-gray-600',    label: 'menambah foto bukti',            dot: '⚪' },
-  delete:      { bg: 'bg-red-100 text-red-700',      label: 'memindah ke Tempat Sampah',      dot: '🔴' },
-  restore:     { bg: 'bg-green-100 text-green-700',  label: 'memulihkan dari Tempat Sampah',  dot: '🟢' },
-  purge:       { bg: 'bg-red-100 text-red-700',      label: 'menghapus laporan permanen',     dot: '🔴' },
+  create:           { bg: 'bg-green-100 text-green-700',  label: 'membuat laporan',               dot: '🟢' },
+  update:           { bg: 'bg-blue-100 text-blue-700',    label: 'mengedit laporan',               dot: '🔵' },
+  amend:            { bg: 'bg-amber-100 text-amber-700',  label: 'membuat amandemen',              dot: '🟡' },
+  amended_by:       { bg: 'bg-amber-100 text-amber-700',  label: 'mengamandemen laporan ini',      dot: '🟡' },
+  photo_added:      { bg: 'bg-gray-100 text-gray-600',    label: 'menambah foto bukti',            dot: '⚪' },
+  delete:           { bg: 'bg-red-100 text-red-700',      label: 'memindah ke Tempat Sampah',      dot: '🔴' },
+  restore:          { bg: 'bg-green-100 text-green-700',  label: 'memulihkan dari Tempat Sampah',  dot: '🟢' },
+  purge:            { bg: 'bg-red-100 text-red-700',      label: 'menghapus laporan permanen',     dot: '🔴' },
+  verify:           { bg: 'bg-green-100 text-green-700',  label: 'memverifikasi laporan (permanen)', dot: '✓' },
+  request_revision: { bg: 'bg-amber-100 text-amber-700',  label: 'meminta revisi',                  dot: '⏵' },
 }
 
 function StatusChip({ label, value }) {
@@ -107,6 +110,72 @@ function TimelineEntry({ entry, isLast }) {
   )
 }
 
+function VerifyConfirmModal({ onConfirm, onCancel, loading }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-30 flex items-center justify-center p-4 animate-fade-in"
+      onClick={onCancel}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 animate-scale-in"
+        onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-bold text-gray-900 mb-2">Verifikasi Laporan?</h3>
+        <p className="text-sm text-gray-600 mb-3">
+          Verifikasi bersifat <strong>permanen</strong> dan <strong>tidak dapat dibatalkan</strong>.
+          Setelah diverifikasi, laporan ini tidak dapat lagi diminta revisi atau dicabut verifikasinya.
+        </p>
+        <p className="text-sm text-gray-500 mb-4">Pastikan Anda sudah meninjau laporan dengan teliti.</p>
+        <div className="flex gap-2">
+          <button className="btn-secondary flex-1" onClick={onCancel} disabled={loading}>Batal</button>
+          <button
+            className="btn-primary flex-1 bg-green-600 hover:bg-green-700 border-green-600"
+            onClick={onConfirm}
+            disabled={loading}
+          >
+            {loading ? 'Memverifikasi…' : 'Ya, Verifikasi'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RevisionRequestModal({ existingNote, onConfirm, onCancel, loading }) {
+  const [note, setNote] = useState(existingNote || '')
+  const isUpdate = !!existingNote
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-30 flex items-center justify-center p-4 animate-fade-in"
+      onClick={onCancel}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 animate-scale-in"
+        onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-bold text-gray-900 mb-2">
+          {isUpdate ? 'Perbarui Permintaan Revisi' : 'Minta Revisi'}
+        </h3>
+        <p className="text-sm text-gray-500 mb-3">
+          Teknisi akan mendapatkan notifikasi dan dapat membuat amandemen.
+        </p>
+        <textarea
+          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 resize-none"
+          rows={4}
+          maxLength={500}
+          placeholder="Tuliskan catatan revisi untuk teknisi…"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          autoFocus
+        />
+        <p className="text-xs text-gray-400 text-right mt-1">{note.length}/500</p>
+        <div className="flex gap-2 mt-3">
+          <button className="btn-secondary flex-1" onClick={onCancel} disabled={loading}>Batal</button>
+          <button
+            className="btn-primary flex-1 bg-amber-500 hover:bg-amber-600 border-amber-500"
+            onClick={() => onConfirm(note)}
+            disabled={loading || note.trim().length === 0}
+          >
+            {loading ? 'Mengirim…' : isUpdate ? 'Perbarui Permintaan' : 'Kirim Permintaan'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function DeleteConfirmModal({ log, onConfirm, onCancel }) {
   const purgeDate = new Date()
   purgeDate.setDate(purgeDate.getDate() + 7)
@@ -143,6 +212,8 @@ export default function LaporanDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [showVerifyModal, setShowVerifyModal] = useState(false)
+  const [showRevisionModal, setShowRevisionModal] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
 
   useEffect(() => {
@@ -162,11 +233,15 @@ export default function LaporanDetail() {
       .finally(() => setLoading(false))
   }, [id])
 
-  const isOwn   = user && log?.user === user.id
-  const inGrace = log?.created_at && (Date.now() - new Date(log.created_at).getTime()) < GRACE_MS
-  const isDeleted = !!log?.deleted_at
-  const canEdit  = !isDeleted && ((isOwn && inGrace) || isManager)
-  const canAmend = !isDeleted && ((isOwn && !inGrace) || isManager) && !log?.amends
+  const isOwn       = user && log?.user === user.id
+  const inGrace     = log?.created_at && (Date.now() - new Date(log.created_at).getTime()) < GRACE_MS
+  const isDeleted   = !!log?.deleted_at
+  const isVerified  = log?.verification_status === 'verified'
+  const isRevisionRequested = log?.verification_status === 'revision_requested'
+  const canEdit     = !isDeleted && ((isOwn && inGrace && !isVerified) || isManager)
+  const canAmend    = !isDeleted && !log?.amends && ((isOwn && !isVerified) || isManager)
+  const canVerify   = isManager && !isDeleted && !isVerified
+  const canRequestRevision = isManager && !isDeleted && !isVerified
 
   const handleDelete = async () => {
     setActionLoading(true)
@@ -186,11 +261,43 @@ export default function LaporanDetail() {
     try {
       const res = await client.post(`/inspections/${id}/restore/`)
       setLog(res.data)
-      // Reload audit trail
       const auditRes = await client.get(`/inspections/${id}/audit/`)
       setAudit(Array.isArray(auditRes.data) ? auditRes.data : auditRes.data.results || [])
     } catch (err) {
       setError(err?.response?.data?.detail || 'Gagal memulihkan laporan')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleVerify = async () => {
+    setActionLoading(true)
+    try {
+      const res = await client.post(`/inspections/${id}/verify/`)
+      setLog(res.data)
+      setShowVerifyModal(false)
+      const auditRes = await client.get(`/inspections/${id}/audit/`)
+      setAudit(Array.isArray(auditRes.data) ? auditRes.data : auditRes.data.results || [])
+    } catch (err) {
+      setError(err?.response?.data?.detail || 'Gagal memverifikasi laporan')
+      setShowVerifyModal(false)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleRequestRevision = async (note) => {
+    setActionLoading(true)
+    try {
+      const res = await client.post(`/inspections/${id}/request_revision/`, { note })
+      setLog(res.data)
+      setShowRevisionModal(false)
+      const auditRes = await client.get(`/inspections/${id}/audit/`)
+      setAudit(Array.isArray(auditRes.data) ? auditRes.data : auditRes.data.results || [])
+    } catch (err) {
+      const errData = err?.response?.data
+      setError(errData?.note?.[0] || errData?.detail || 'Gagal mengirim permintaan revisi')
+      setShowRevisionModal(false)
     } finally {
       setActionLoading(false)
     }
@@ -284,6 +391,29 @@ export default function LaporanDetail() {
                 Amandemen
               </button>
             )}
+            {!isManager && isVerified && (
+              <span className="text-xs text-gray-400 italic">
+                ℹ Laporan ini sudah terverifikasi. Hanya Manajer yang dapat melakukan perubahan.
+              </span>
+            )}
+            {canVerify && (
+              <button
+                className="text-sm font-medium px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors"
+                onClick={() => setShowVerifyModal(true)}
+                disabled={actionLoading}
+              >
+                Verifikasi
+              </button>
+            )}
+            {canRequestRevision && (
+              <button
+                className="text-sm font-medium px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white transition-colors"
+                onClick={() => setShowRevisionModal(true)}
+                disabled={actionLoading}
+              >
+                {isRevisionRequested ? 'Perbarui Permintaan' : 'Minta Revisi'}
+              </button>
+            )}
             {isManager && !isDeleted && (
               <button
                 className="btn-danger text-sm"
@@ -374,6 +504,48 @@ export default function LaporanDetail() {
         )}
       </div>
 
+      {/* Verification card */}
+      <div className="card space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h2 className="font-semibold text-gray-800">Status Verifikasi</h2>
+          <VerificationChip
+            status={log?.verification_status}
+            editedAfter={log?.edited_after_verification}
+          />
+        </div>
+
+        {isVerified && (
+          <div className="text-sm text-gray-600 space-y-1">
+            <p>
+              Diverifikasi oleh{' '}
+              <strong>{log.verified_by_nama || log.verified_by_username || '—'}</strong>
+              {' · '}
+              {timeAgo(log.verified_at)}
+            </p>
+            {log.edited_after_verification && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                ⚠ Laporan ini telah diedit setelah diverifikasi pada {formatDateTime(log.verified_at)}.
+                Stempel verifikasi tidak dapat dicabut dan tetap berlaku, namun konten saat ini mungkin sudah berubah dari yang diverifikasi.
+              </p>
+            )}
+          </div>
+        )}
+
+        {isRevisionRequested && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-1">
+            <p className="text-sm font-medium text-amber-800">Catatan Revisi:</p>
+            <p className="text-sm text-amber-700">{log.revision_request_note}</p>
+            <p className="text-xs text-amber-500">
+              — {log.revision_requested_by_nama || '—'} · {timeAgo(log.revision_requested_at)}
+            </p>
+          </div>
+        )}
+
+        {!isVerified && !isRevisionRequested && (
+          <p className="text-sm text-gray-400">Belum ditinjau oleh Manajer.</p>
+        )}
+      </div>
+
       {/* Photos */}
       <div className="card">
         <h2 className="font-semibold text-gray-800 mb-3">Foto Bukti</h2>
@@ -403,6 +575,21 @@ export default function LaporanDetail() {
           log={log}
           onConfirm={handleDelete}
           onCancel={() => setShowDeleteModal(false)}
+        />
+      )}
+      {showVerifyModal && (
+        <VerifyConfirmModal
+          onConfirm={handleVerify}
+          onCancel={() => setShowVerifyModal(false)}
+          loading={actionLoading}
+        />
+      )}
+      {showRevisionModal && (
+        <RevisionRequestModal
+          existingNote={isRevisionRequested ? log.revision_request_note : ''}
+          onConfirm={handleRequestRevision}
+          onCancel={() => setShowRevisionModal(false)}
+          loading={actionLoading}
         />
       )}
     </div>

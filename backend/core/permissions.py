@@ -57,6 +57,9 @@ class IsOwnerOrManagerWithGrace(permissions.BasePermission):
         # Technician: must be the owner
         if obj.user_id != request.user.id:
             return False
+        # Once verified, a teknisi can no longer modify — manager only
+        if obj.verified_at is not None:
+            return False
         if request.method == 'DELETE':
             # Hard delete restricted to managers
             return False

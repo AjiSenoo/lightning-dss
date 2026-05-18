@@ -212,11 +212,24 @@ class Command(BaseCommand):
                              'status_grounding','resistansi_grounding_ohm','catatan_teknisi']},
         )
         InspectionLogAudit.objects.filter(pk=a1.pk).update(at=now - timedelta(days=3))
-        self.stdout.write('  Created demo log 1: Laporan Biasa (Kilang Balongan)')
 
-        # ── Log 2: Laporan dengan edit oleh manajer ─────────────────────────
+        # Verify log1 by manager (backdated 3 days, +2 hours after creation)
+        verify_at = now - timedelta(days=3) + timedelta(hours=2)
+        InspectionLog.objects.filter(pk=log1.pk).update(
+            verified_at=verify_at, verified_by=manager,
+        )
+        log1.refresh_from_db()
+        a1v = InspectionLogAudit.objects.create(
+            inspection=log1, actor=manager, action='verify',
+            diff={},
+            note='Laporan diverifikasi oleh Manajer (permanen)',
+        )
+        InspectionLogAudit.objects.filter(pk=a1v.pk).update(at=verify_at)
+        self.stdout.write('  Created demo log 1: Laporan Biasa (Kilang Balongan) — Terverifikasi')
+
+        # ── Log 2: Laporan dengan edit + revisi diminta ──────────────────────
         catatan_awal   = '[DEMO] Ditemukan resistansi grounding tinggi. Segera periksa sambungan.'
-        catatan_edited = '[DEMO] Ditemukan resistansi grounding tinggi. Segera periksa sambungan. (diverifikasi oleh Manajer)'
+        catatan_edited = '[DEMO] Ditemukan resistansi grounding tinggi. Segera periksa sambungan. Perlu tindak lanjut.'
         log2 = InspectionLog.objects.create(
             asset=kilang, user=teknisi,
             tgl_inspeksi=now - timedelta(days=5),
@@ -238,7 +251,22 @@ class Command(BaseCommand):
             diff={'catatan_teknisi': {'old': catatan_awal, 'new': catatan_edited}},
         )
         InspectionLogAudit.objects.filter(pk=a2b.pk).update(at=now - timedelta(days=5) + timedelta(minutes=4))
-        self.stdout.write('  Created demo log 2: Laporan Dengan Edit (Kilang Balongan)')
+
+        # Set log2 to Revisi Diminta
+        revision_note = 'Mohon lampirkan foto sambungan grounding yang baru.'
+        revision_at = now - timedelta(days=4)
+        InspectionLog.objects.filter(pk=log2.pk).update(
+            revision_requested_at=revision_at,
+            revision_requested_by=manager,
+            revision_request_note=revision_note,
+        )
+        a2r = InspectionLogAudit.objects.create(
+            inspection=log2, actor=manager, action='request_revision',
+            diff={'note': {'old': None, 'new': revision_note}},
+            note=f'Revisi diminta: {revision_note[:120]}',
+        )
+        InspectionLogAudit.objects.filter(pk=a2r.pk).update(at=revision_at)
+        self.stdout.write('  Created demo log 2: Laporan Dengan Edit (Kilang Balongan) — Revisi Diminta')
 
         # ── Log 3: Original + amandemen ─────────────────────────────────────
         log3_orig = InspectionLog.objects.create(
@@ -372,3 +400,27 @@ class Command(BaseCommand):
         # Rate-limit so a manual check_stale_inspections run respects the cooldown
         AssetRegistry.objects.filter(pk=menara.pk).update(last_stale_notified_at=now)
         self.stdout.write('  Created demo stale-asset notification for manager (1 unread)')
+
+        # ── Verify + Revisi notifications for teknisi ────────────────────────
+        log2 = InspectionLog.objects.filter(
+            asset=kilang, catatan_teknisi__contains='Perlu tindak lanjut'
+        ).first()
+
+        if log1:
+            # read — manager verified log1 (teknisi is creator → receives notification)
+            n6 = Notification.objects.create(
+                recipient=teknisi, actor=manager, verb='verify', inspection=log1,
+                read_at=now - timedelta(days=3) + timedelta(hours=3),
+            )
+            Notification.objects.filter(pk=n6.pk).update(
+                created_at=now - timedelta(days=3) + timedelta(hours=2)
+            )
+
+        if log2:
+            # unread — manager requested revision on log2
+            n7 = Notification.objects.create(
+                recipient=teknisi, actor=manager, verb='request_revision', inspection=log2,
+            )
+            Notification.objects.filter(pk=n7.pk).update(created_at=now - timedelta(days=4))
+
+        self.stdout.write('  Created demo verify + request_revision notifications for teknisi (1 unread)')

@@ -85,6 +85,12 @@ export const URGENCY_COLORS = {
   'Inspeksi Darurat': STATUS_COLORS.bahaya,
 }
 
+export const VERIFICATION_STATUS = {
+  verified:           { bg: 'bg-green-50 ring-green-200 text-green-700', dot: 'bg-green-500', label: 'Terverifikasi' },
+  revision_requested: { bg: 'bg-amber-50 ring-amber-200 text-amber-700', dot: 'bg-amber-500', label: 'Revisi Diminta' },
+  pending:            { bg: 'bg-gray-50 ring-gray-200 text-gray-600',    dot: 'bg-gray-400',  label: 'Belum Diverifikasi' },
+}
+
 export const timeAgo = (iso) => {
   if (!iso) return '—'
   const diff = (Date.now() - new Date(iso).getTime()) / 1000

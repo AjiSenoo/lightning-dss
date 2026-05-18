@@ -4,13 +4,15 @@ import client from '../api/client'
 import { timeAgo } from '../utils/constants'
 
 const VERB_LABELS = {
-  create:      'membuat laporan baru di',
-  update:      'mengedit laporan di',
-  amend:       'mengamandemen laporan di',
-  delete:      'memindah laporan ke Tempat Sampah di',
-  restore:     'memulihkan laporan dari Tempat Sampah di',
-  lightning:   'Kejadian petir baru tercatat di',
-  stale_asset: 'Aset belum diinspeksi:',
+  create:           'membuat laporan baru di',
+  update:           'mengedit laporan di',
+  amend:            'mengamandemen laporan di',
+  delete:           'memindah laporan ke Tempat Sampah di',
+  restore:          'memulihkan laporan dari Tempat Sampah di',
+  lightning:        'Kejadian petir baru tercatat di',
+  stale_asset:      'Aset belum diinspeksi:',
+  verify:           'memverifikasi laporan di',
+  request_revision: 'meminta revisi laporan di',
 }
 
 function renderText(notif) {

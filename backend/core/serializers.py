@@ -105,17 +105,22 @@ class InspectionPhotoSerializer(serializers.ModelSerializer):
 
 
 class InspectionLogSerializer(serializers.ModelSerializer):
-    asset_nama_gedung    = serializers.CharField(source='asset.nama_gedung', read_only=True)
-    user_nama            = serializers.CharField(source='user.nama_lengkap', read_only=True)
-    user_username        = serializers.CharField(source='user.username', read_only=True)
-    updated_by_nama      = serializers.CharField(source='updated_by.nama_lengkap', read_only=True)
-    updated_by_username  = serializers.CharField(source='updated_by.username', read_only=True)
-    deleted_by_nama      = serializers.CharField(source='deleted_by.nama_lengkap', read_only=True)
-    purge_at             = serializers.SerializerMethodField()
-    amendments           = serializers.SerializerMethodField()
-    health_before        = serializers.FloatField(read_only=True, default=None)
-    health_after         = serializers.FloatField(read_only=True, default=None)
-    photos               = InspectionPhotoSerializer(many=True, read_only=True)
+    asset_nama_gedung           = serializers.CharField(source='asset.nama_gedung', read_only=True)
+    user_nama                   = serializers.CharField(source='user.nama_lengkap', read_only=True)
+    user_username               = serializers.CharField(source='user.username', read_only=True)
+    updated_by_nama             = serializers.CharField(source='updated_by.nama_lengkap', read_only=True)
+    updated_by_username         = serializers.CharField(source='updated_by.username', read_only=True)
+    deleted_by_nama             = serializers.CharField(source='deleted_by.nama_lengkap', read_only=True)
+    verified_by_nama            = serializers.CharField(source='verified_by.nama_lengkap', read_only=True)
+    verified_by_username        = serializers.CharField(source='verified_by.username', read_only=True)
+    revision_requested_by_nama  = serializers.CharField(source='revision_requested_by.nama_lengkap', read_only=True)
+    verification_status         = serializers.SerializerMethodField()
+    edited_after_verification   = serializers.SerializerMethodField()
+    purge_at                    = serializers.SerializerMethodField()
+    amendments                  = serializers.SerializerMethodField()
+    health_before               = serializers.FloatField(read_only=True, default=None)
+    health_after                = serializers.FloatField(read_only=True, default=None)
+    photos                      = InspectionPhotoSerializer(many=True, read_only=True)
 
     class Meta:
         model = InspectionLog
@@ -129,12 +134,18 @@ class InspectionLogSerializer(serializers.ModelSerializer):
             'amends', 'amendments', 'created_at',
             'updated_at', 'updated_by', 'updated_by_nama', 'updated_by_username',
             'deleted_at', 'deleted_by', 'deleted_by_nama', 'purge_at',
+            'verified_at', 'verified_by', 'verified_by_nama', 'verified_by_username',
+            'revision_requested_at', 'revision_requested_by', 'revision_requested_by_nama',
+            'revision_request_note',
+            'verification_status', 'edited_after_verification',
             'health_before', 'health_after', 'photos',
         ]
         read_only_fields = [
             'log_id', 'amends', 'amendments', 'user_nama', 'user_username',
             'created_at', 'updated_at', 'updated_by_nama', 'updated_by_username',
             'deleted_by_nama', 'purge_at', 'photos',
+            'verified_by_nama', 'verified_by_username', 'revision_requested_by_nama',
+            'verification_status', 'edited_after_verification',
         ]
 
     def get_amendments(self, obj):
@@ -144,6 +155,16 @@ class InspectionLogSerializer(serializers.ModelSerializer):
         if obj.deleted_at is None:
             return None
         return obj.deleted_at + timedelta(days=settings.INSPECTION_DELETE_GRACE_DAYS)
+
+    def get_verification_status(self, obj):
+        if obj.verified_at:
+            return 'verified'
+        if obj.revision_requested_at:
+            return 'revision_requested'
+        return 'pending'
+
+    def get_edited_after_verification(self, obj):
+        return bool(obj.verified_at and obj.updated_at and obj.updated_at > obj.verified_at)
 
 
 class InspectionLogAuditSerializer(serializers.ModelSerializer):
