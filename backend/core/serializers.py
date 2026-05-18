@@ -90,6 +90,8 @@ class LightningEventSerializer(serializers.ModelSerializer):
     rasio_stres = serializers.FloatField(read_only=True)
     fuzzy_output_score = serializers.FloatField(read_only=True)
     fuzzy_output_label = serializers.CharField(read_only=True)
+    created_by_nama = serializers.CharField(source='created_by.nama_lengkap', read_only=True)
+    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
 
     class Meta:
         model = LightningEvent
@@ -97,7 +99,7 @@ class LightningEventSerializer(serializers.ModelSerializer):
             'event_id', 'asset', 'asset_nama_gedung', 'asset_lpl_grade',
             'timestamp', 'estimasi_arus_puncak_ka', 'rasio_stres',
             'fuzzy_output_score', 'fuzzy_output_label',
-            'catatan', 'created_by', 'created_at',
+            'catatan', 'created_by', 'created_by_nama', 'created_by_username', 'created_at',
         ]
         read_only_fields = [
             'event_id', 'rasio_stres', 'fuzzy_output_score', 'fuzzy_output_label',

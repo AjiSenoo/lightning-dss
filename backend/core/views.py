@@ -264,10 +264,20 @@ class EventViewSet(viewsets.ModelViewSet):
         org = _user_org(self.request)
         if org:
             qs = qs.filter(asset__organization=org)
-        asset_id = self.request.query_params.get('asset')
+        params = self.request.query_params
+        asset_id = params.get('asset')
         if asset_id:
             qs = qs.filter(asset_id=asset_id)
-        return qs
+        date_from = params.get('from')
+        if date_from:
+            qs = qs.filter(timestamp__date__gte=date_from)
+        date_to = params.get('to')
+        if date_to:
+            qs = qs.filter(timestamp__date__lte=date_to)
+        urgency = params.get('urgency')
+        if urgency:
+            qs = qs.filter(fuzzy_output_label__iexact=urgency)
+        return qs.order_by('-timestamp')
 
     def perform_create(self, serializer):
         from fuzzy_engine import run_inference, calculate_ahi

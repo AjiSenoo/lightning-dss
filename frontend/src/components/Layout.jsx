@@ -10,6 +10,7 @@ const BASE_NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: '🏠', end: true },
   { to: '/assets', label: 'Portofolio Aset', icon: '🏗️' },
   { to: '/inspections', label: 'Riwayat Inspeksi', icon: '📋' },
+  { to: '/events', label: 'Riwayat Sambaran', icon: '🌩️' },
   { to: '/inspections/new', label: 'Input Logbook', icon: '✏️' },
   { to: '/events/new', label: 'Input Kejadian', icon: '⚡' },
 ]

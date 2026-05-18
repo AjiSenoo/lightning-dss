@@ -31,6 +31,18 @@ const AUDIT_LABEL = {
   purge:   'menghapus permanen',
 }
 
+function StatusChip({ label, value }) {
+  const ok = value === 'OK'
+  return (
+    <span className={`pill ring-1 text-[10px] py-0 ${
+      ok ? 'bg-green-50 text-green-700 ring-green-100' : 'bg-red-50 text-red-700 ring-red-100'
+    }`}>
+      <span className={`w-1 h-1 rounded-full ${ok ? 'bg-green-500' : 'bg-red-500'}`} />
+      {label}
+    </span>
+  )
+}
+
 function DiffPreview({ diff }) {
   const entries = Object.entries(diff).filter(([, v]) => v && typeof v === 'object' && 'old' in v)
   if (entries.length === 0) return null
@@ -425,7 +437,11 @@ export default function AssetDetail() {
                           {log.amends && (
                             <span className="text-xs text-amber-700">↳</span>
                           )}
-                          <span>Inspeksi — {log.status_air_terminal} / {log.status_down_conductor} / {log.status_grounding}</span>
+                          <span className="flex items-center gap-1 flex-wrap">
+                            <StatusChip label="AT" value={log.status_air_terminal} />
+                            <StatusChip label="DC" value={log.status_down_conductor} />
+                            <StatusChip label="GD" value={log.status_grounding} />
+                          </span>
                           {log.amends && (
                             <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Amandemen</span>
                           )}
