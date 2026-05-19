@@ -374,6 +374,16 @@ class InspectionViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
+        if instance.deleted_at is not None:
+            return Response(
+                {'detail': 'Laporan di Tempat Sampah harus dipulihkan dulu sebelum diedit.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if instance.verified_at is not None:
+            return Response(
+                {'detail': 'Laporan sudah terverifikasi. Cabut verifikasi terlebih dahulu sebelum mengedit.'},
+                status=status.HTTP_409_CONFLICT,
+            )
         partial = kwargs.pop('partial', False)
         non_ok_fields = ['status_air_terminal', 'status_down_conductor', 'status_grounding']
         def status_val(field):
@@ -387,6 +397,9 @@ class InspectionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        asset = instance.asset
+        health_before = asset.skor_kesehatan_aset
+
         before = _snapshot(instance)
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
@@ -399,21 +412,12 @@ class InspectionViewSet(viewsets.ModelViewSet):
             updated.save(update_fields=['updated_by', 'updated_at'])
 
             if diff or new_photos:
-                is_post_verify = (
-                    updated.verified_at is not None
-                    and getattr(request.user, 'role', None) == 'Manajer'
-                )
-                audit_note = (
-                    'Log diperbarui oleh Manajer setelah verifikasi'
-                    if is_post_verify
-                    else 'Log diperbarui dalam masa grace'
-                )
                 InspectionLogAudit.objects.create(
                     inspection=updated,
                     actor=request.user,
                     action='update',
                     diff=diff,
-                    note=audit_note,
+                    note='Log diperbarui',
                 )
                 _emit_laporan_notification(updated, request.user, 'update')
             for f in new_photos:
@@ -426,7 +430,21 @@ class InspectionViewSet(viewsets.ModelViewSet):
                     note='Foto bukti ditambahkan',
                 )
 
-        return Response(InspectionLogSerializer(updated).data)
+        from fuzzy_engine import update_asset_health
+        try:
+            feedback = update_asset_health(
+                asset=asset,
+                inspection_log=updated,
+                linked_event=updated.event,
+            )
+            health_after = feedback['health_after']
+        except Exception:
+            health_after = asset.skor_kesehatan_aset
+
+        data = InspectionLogSerializer(updated).data
+        data['health_before'] = health_before
+        data['health_after'] = health_after
+        return Response(data)
 
     def partial_update(self, request, *args, **kwargs):
         kwargs['partial'] = True
@@ -554,17 +572,19 @@ class InspectionViewSet(viewsets.ModelViewSet):
             )
         if instance.verified_at is not None:
             return Response(
-                {'detail': 'Laporan sudah terverifikasi. Verifikasi tidak dapat diubah.'},
+                {'detail': 'Laporan sudah terverifikasi. Cabut verifikasi terlebih dahulu jika ingin memverifikasi ulang.'},
                 status=status.HTTP_409_CONFLICT,
             )
         had_revision = bool(instance.revision_requested_at)
         prior_note = instance.revision_request_note
         with transaction.atomic():
-            instance.verified_at = timezone.now()
+            now = timezone.now()
+            instance.verified_at = now
             instance.verified_by = request.user
             instance.revision_requested_at = None
             instance.revision_requested_by = None
             instance.revision_request_note = ''
+            instance.updated_at = now
             instance.save(update_fields=[
                 'verified_at', 'verified_by',
                 'revision_requested_at', 'revision_requested_by', 'revision_request_note',
@@ -572,10 +592,10 @@ class InspectionViewSet(viewsets.ModelViewSet):
             ])
             if had_revision:
                 audit_diff = {'resolves_revision': True, 'prior_note': prior_note}
-                audit_note = 'Verifikasi (permanen) — menyelesaikan permintaan revisi'
+                audit_note = 'Verifikasi — menyelesaikan permintaan revisi'
             else:
                 audit_diff = {}
-                audit_note = 'Laporan diverifikasi oleh Manajer (permanen)'
+                audit_note = 'Laporan diverifikasi oleh Manajer'
             InspectionLogAudit.objects.create(
                 inspection=instance,
                 actor=request.user,
@@ -585,6 +605,47 @@ class InspectionViewSet(viewsets.ModelViewSet):
             )
             _emit_laporan_notification(instance, request.user, 'verify')
         return Response(InspectionLogSerializer(instance).data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsManagerForUsers])
+    def revoke_verification(self, request, pk=None):
+        instance = self.get_object()
+        if instance.deleted_at is not None:
+            return Response(
+                {'detail': 'Tidak dapat mencabut verifikasi laporan di Tempat Sampah.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if instance.verified_at is None:
+            return Response(
+                {'detail': 'Laporan belum terverifikasi.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        note = (request.data.get('note') or '').strip()
+        if len(note) > 500:
+            return Response({'note': ['Catatan maksimum 500 karakter.']}, status=status.HTTP_400_BAD_REQUEST)
+        prior_verified_at = instance.verified_at
+        prior_verified_by_id = instance.verified_by_id
+        with transaction.atomic():
+            locked = InspectionLog.objects.select_for_update().get(pk=instance.pk)
+            if locked.verified_at is None:
+                return Response(
+                    {'detail': 'Laporan sudah dicabut verifikasinya oleh aksi lain.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            locked.verified_at = None
+            locked.verified_by = None
+            locked.save(update_fields=['verified_at', 'verified_by', 'updated_at'])
+            InspectionLogAudit.objects.create(
+                inspection=locked,
+                actor=request.user,
+                action='revoke_verification',
+                diff={
+                    'verified_at_before': prior_verified_at.isoformat(),
+                    'verified_by_id_before': str(prior_verified_by_id) if prior_verified_by_id else None,
+                },
+                note=f'Verifikasi dicabut oleh Manajer{(": " + note[:120]) if note else ""}',
+            )
+            _emit_laporan_notification(locked, request.user, 'revoke_verification')
+        return Response(InspectionLogSerializer(locked).data)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsManagerForUsers])
     def request_revision(self, request, pk=None):

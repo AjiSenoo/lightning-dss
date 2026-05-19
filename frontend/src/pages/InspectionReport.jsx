@@ -102,7 +102,7 @@ export default function InspectionReport() {
   const eligibility = (log) => {
     const isOwn = user && log.user === user.id
     const inGrace = log.created_at && (Date.now() - new Date(log.created_at).getTime()) < GRACE_MS
-    const canEdit = (isOwn && inGrace) || isManager
+    const canEdit = !log.verified_at && ((isOwn && inGrace) || isManager)
     const canAmend = ((isOwn && !inGrace) || isManager) && !log.amends
     return { canEdit, canAmend }
   }
@@ -248,10 +248,7 @@ export default function InspectionReport() {
                       </div>
                     </td>
                     <td className="py-3 px-4">
-                      <VerificationChip
-                        status={log.verification_status}
-                        editedAfter={log.edited_after_verification}
-                      />
+                      <VerificationChip status={log.verification_status} />
                     </td>
                     <td className="py-3 px-4 text-gray-600">{log.photos?.length ? `📷 ${log.photos.length}` : '—'}</td>
                     <td className="py-3 px-4"><AmendmentBadge log={log} /></td>

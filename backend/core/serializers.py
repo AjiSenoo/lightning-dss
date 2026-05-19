@@ -125,7 +125,6 @@ class InspectionLogSerializer(serializers.ModelSerializer):
     verified_by_username        = serializers.CharField(source='verified_by.username', read_only=True)
     revision_requested_by_nama  = serializers.CharField(source='revision_requested_by.nama_lengkap', read_only=True)
     verification_status         = serializers.SerializerMethodField()
-    edited_after_verification   = serializers.SerializerMethodField()
     purge_at                    = serializers.SerializerMethodField()
     amendments                  = serializers.SerializerMethodField()
     health_before               = serializers.FloatField(read_only=True, default=None)
@@ -147,7 +146,7 @@ class InspectionLogSerializer(serializers.ModelSerializer):
             'verified_at', 'verified_by', 'verified_by_nama', 'verified_by_username',
             'revision_requested_at', 'revision_requested_by', 'revision_requested_by_nama',
             'revision_request_note',
-            'verification_status', 'edited_after_verification',
+            'verification_status',
             'health_before', 'health_after', 'photos',
         ]
         read_only_fields = [
@@ -155,7 +154,7 @@ class InspectionLogSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at', 'updated_by_nama', 'updated_by_username',
             'deleted_by_nama', 'purge_at', 'photos',
             'verified_by_nama', 'verified_by_username', 'revision_requested_by_nama',
-            'verification_status', 'edited_after_verification',
+            'verification_status',
         ]
 
     def get_amendments(self, obj):
@@ -172,9 +171,6 @@ class InspectionLogSerializer(serializers.ModelSerializer):
         if obj.revision_requested_at:
             return 'revision_requested'
         return 'pending'
-
-    def get_edited_after_verification(self, obj):
-        return bool(obj.verified_at and obj.updated_at and obj.updated_at > obj.verified_at)
 
 
 class InspectionLogAuditSerializer(serializers.ModelSerializer):

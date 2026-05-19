@@ -7,8 +7,7 @@ import HealthTrend from '../components/HealthTrend'
 import { HealthGaugeInline } from '../components/HealthGauge'
 import { UrgencyBadge } from '../components/StatusBadge'
 import AssetForm from '../components/AssetForm'
-import FuzzyVisualizer from '../components/FuzzyVisualizer'
-import { LPL_LABELS, URGENCY_ACTIONS, formatDate, formatDateTime, getHealthStatus, timeAgo } from '../utils/constants'
+import { LPL_LABELS, formatDate, formatDateTime, getHealthStatus, timeAgo } from '../utils/constants'
 import cacheStore from '../offline/cacheStore'
 import client from '../api/client'
 import { useAuth, useIsManager } from '../auth/AuthContext'
@@ -60,144 +59,19 @@ function DiffPreview({ diff }) {
   )
 }
 
-function IUIExplainer({ asset, latestEvent }) {
-  const [open, setOpen] = useState(false)
-  const initialR = latestEvent?.rasio_stres ?? 0.5
-  const initialD = 1 - (asset?.skor_kesehatan_aset ?? 0.7)
-  const [rStress, setRStress] = useState(initialR)
-  const [dAsset, setDAsset] = useState(initialD)
-  const [simResult, setSimResult] = useState(null)
-  const [simLoading, setSimLoading] = useState(false)
-
-  const runSimulation = async () => {
-    setSimLoading(true)
-    try {
-      const res = await client.get(`/fuzzy/simulate/?r_stress=${rStress}&d_asset=${dAsset}`)
-      setSimResult(res.data)
-    } catch {
-      const { localFuzzyApprox } = await import('../offline/fuzzyLookupTable')
-      const local = localFuzzyApprox(rStress * 100, asset?.lpl_grade || 'III', 1 - dAsset)
-      setSimResult({ score: local.score, label: local.label, provisional: true })
-    } finally {
-      setSimLoading(false)
-    }
-  }
-
-  const RULES = [
-    ['D_asset = Prima', 'Rutin', 'Rutin', 'Prioritas'],
-    ['D_asset = Degradasi', 'Rutin', 'Prioritas', 'Darurat'],
-    ['D_asset = Kritis', 'Prioritas', 'Darurat', 'Darurat'],
-  ]
-
+function CollapsibleDiff({ diff }) {
+  const [expanded, setExpanded] = useState(false)
+  const entries = Object.entries(diff || {}).filter(([, v]) => v && typeof v === 'object' && 'old' in v)
+  if (entries.length === 0) return null
   return (
-    <div className="card">
+    <div>
       <button
-        type="button"
-        className="w-full flex items-center justify-between text-left"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setExpanded((v) => !v)}
+        className="text-xs text-brand-700 hover:underline mt-1"
       >
-        <h2 className="text-lg font-bold text-gray-800">🔍 Lihat cara perhitungan IUI</h2>
-        <span className="text-gray-400">{open ? '▲' : '▼'}</span>
+        {expanded ? '▼ Sembunyikan detail' : '▶ Lihat detail'}
       </button>
-
-      {open && (
-        <div className="mt-4 space-y-5 border-t pt-4">
-          <p className="text-xs text-gray-500">
-            Nilai di panel ini adalah simulasi — hasil resmi dihitung otomatis saat sambaran direkam.
-          </p>
-
-          <FuzzyVisualizer rStress={rStress} dAsset={dAsset} iuiScore={simResult?.score} />
-
-          <div className="space-y-3">
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <label className="text-gray-600">R_stress (Rasio Stres)</label>
-                <span className="font-semibold">{rStress.toFixed(2)}</span>
-              </div>
-              <input
-                type="range" min={0} max={1.5} step={0.01}
-                value={rStress}
-                onChange={(e) => setRStress(parseFloat(e.target.value))}
-                className="w-full accent-blue-600"
-              />
-              <div className="flex justify-between text-xs text-gray-400">
-                <span>0 (tanpa stres)</span><span>0.65 (batas)</span><span>1.5 (ekstrem)</span>
-              </div>
-            </div>
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <label className="text-gray-600">D_asset (Degradasi Aset)</label>
-                <span className="font-semibold">{dAsset.toFixed(2)}</span>
-              </div>
-              <input
-                type="range" min={0} max={1} step={0.01}
-                value={dAsset}
-                onChange={(e) => setDAsset(parseFloat(e.target.value))}
-                className="w-full accent-blue-600"
-              />
-              <div className="flex justify-between text-xs text-gray-400">
-                <span>0 (prima)</span><span>0.4 (degradasi)</span><span>1.0 (kritis)</span>
-              </div>
-            </div>
-          </div>
-
-          <button className="btn-primary" onClick={runSimulation} disabled={simLoading}>
-            {simLoading ? 'Menghitung...' : 'Jalankan Inferensi Fuzzy'}
-          </button>
-
-          {simResult && (
-            <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-gray-600">Hasil IUI</span>
-                <UrgencyBadge label={simResult.label} size="lg" />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-gray-600">Skor</span>
-                <span className="text-3xl font-bold">{simResult.score?.toFixed(1)}</span>
-              </div>
-              <div className="border-t pt-3 text-sm text-gray-600">
-                {URGENCY_ACTIONS[simResult.label]}
-              </div>
-              {simResult.provisional && (
-                <p className="text-xs text-amber-600">Estimasi lokal (offline)</p>
-              )}
-            </div>
-          )}
-
-          <div className="overflow-x-auto">
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Matriks Aturan Fuzzy (3×3)</h3>
-            <table className="w-full text-sm text-center border-collapse">
-              <thead>
-                <tr>
-                  <th className="border border-gray-200 px-3 py-2 bg-gray-50"></th>
-                  <th className="border border-gray-200 px-3 py-2 bg-gray-50">R_stress = Rendah</th>
-                  <th className="border border-gray-200 px-3 py-2 bg-gray-50">R_stress = Sedang</th>
-                  <th className="border border-gray-200 px-3 py-2 bg-gray-50">R_stress = Tinggi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {RULES.map(([row, ...cells]) => (
-                  <tr key={row}>
-                    <td className="border border-gray-200 px-3 py-2 font-medium bg-gray-50">{row}</td>
-                    {cells.map((cell, i) => {
-                      const cls = cell === 'Rutin'
-                        ? 'bg-green-50 text-green-700'
-                        : cell === 'Prioritas'
-                        ? 'bg-amber-50 text-amber-700'
-                        : 'bg-red-50 text-red-700'
-                      return (
-                        <td key={i} className={`border border-gray-200 px-3 py-2 font-semibold ${cls}`}>
-                          {cell}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {expanded && <DiffPreview diff={diff} />}
     </div>
   )
 }
@@ -205,7 +79,7 @@ function IUIExplainer({ asset, latestEvent }) {
 function inspectionEligibility(log, currentUserId, isManager) {
   const isOwn = currentUserId && log.user === currentUserId
   const inGrace = log.created_at && (Date.now() - new Date(log.created_at).getTime()) < GRACE_MS
-  const canEdit = (isOwn && inGrace) || isManager
+  const canEdit = !log.verified_at && ((isOwn && inGrace) || isManager)
   const canAmend = ((isOwn && !inGrace) || isManager) && !log.amends
   return { canEdit, canAmend }
 }
@@ -271,6 +145,19 @@ export default function AssetDetail() {
 
   const events = history.filter((h) => h.type === 'event').map((h) => h.data)
   const inspections = history.filter((h) => h.type === 'inspection').map((h) => h.data)
+
+  const unifiedTimeline = [
+    ...history.map((item) => ({
+      _type: item.type,
+      _ts: item.type === 'event' ? item.data.timestamp : item.data.tgl_inspeksi,
+      data: item.data,
+    })),
+    ...audits.map((a) => ({
+      _type: 'audit',
+      _ts: a.created_at,
+      data: a,
+    })),
+  ].sort((a, b) => new Date(b._ts) - new Date(a._ts)).slice(0, 30)
   const color = getHealthStatus(asset.skor_kesehatan_aset)
 
   const ahiPieData = [
@@ -405,114 +292,108 @@ export default function AssetDetail() {
         </div>
       </div>
 
-      {/* Timeline */}
+      {/* Unified timeline */}
       <div className="card">
         <h2 className="text-lg font-bold text-gray-800 mb-4">Riwayat Aktivitas</h2>
-        {history.length === 0 ? (
+        {unifiedTimeline.length === 0 ? (
           <p className="text-gray-400 text-sm">Belum ada aktivitas</p>
         ) : (
           <div className="space-y-3">
-            {history.slice(0, 20).map((item, i) => (
-              <div key={i} className="flex gap-3 items-start">
-                <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${item.type === 'event' ? 'bg-amber-400' : 'bg-blue-400'}`} />
-                <div className="flex-1 min-w-0">
-                  {item.type === 'event' ? (
-                    <div>
+            {unifiedTimeline.map((item, i) => {
+              if (item._type === 'event') {
+                const ev = item.data
+                return (
+                  <div key={`ev-${ev.event_id ?? i}`} className="flex gap-3 items-start">
+                    <div className="mt-1 w-2 h-2 rounded-full flex-shrink-0 bg-amber-400" />
+                    <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium">
-                        Sambaran {item.data.estimasi_arus_puncak_ka} kA
-                        {item.data.fuzzy_output_label && (
+                        Sambaran {ev.estimasi_arus_puncak_ka} kA
+                        {ev.fuzzy_output_label && (
                           <span className="ml-2">
-                            <UrgencyBadge label={item.data.fuzzy_output_label} size="sm" />
+                            <UrgencyBadge label={ev.fuzzy_output_label} size="sm" />
                           </span>
                         )}
                       </p>
-                      <p className="text-xs text-gray-400">{formatDateTime(item.data.timestamp)}</p>
+                      <p className="text-xs text-gray-400">{formatDateTime(ev.timestamp)}</p>
                     </div>
-                  ) : (() => {
-                    const log = item.data
-                    const { canEdit, canAmend } = inspectionEligibility(log, user?.id, isManager)
-                    return (
-                      <div>
-                        <p className="text-sm font-medium flex items-center gap-2 flex-wrap">
-                          {log.amends && (
-                            <span className="text-xs text-amber-700">↳</span>
-                          )}
-                          <span className="flex items-center gap-1 flex-wrap">
-                            <StatusChip label="AT" value={log.status_air_terminal} />
-                            <StatusChip label="DC" value={log.status_down_conductor} />
-                            <StatusChip label="GD" value={log.status_grounding} />
-                          </span>
-                          {log.amends && (
-                            <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Amandemen</span>
-                          )}
-                          {!log.amends && log.amendments && log.amendments.length > 0 && (
-                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                              Diamandemen ({log.amendments.length})
-                            </span>
-                          )}
-                          {log.photos && log.photos.length > 0 && (
-                            <span className="text-xs text-gray-500">📷 {log.photos.length}</span>
-                          )}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          {formatDateTime(log.tgl_inspeksi)}
-                          {log.user_nama && <> · {log.user_nama}</>}
-                        </p>
-                        {(canEdit || canAmend) && (
-                          <div className="flex gap-3 mt-1">
-                            {canEdit && (
-                              <button
-                                className="text-xs text-blue-600 hover:underline"
-                                onClick={() => navigate(`/inspections/new?edit=${log.log_id}`)}
-                              >
-                                Edit
-                              </button>
-                            )}
-                            {canAmend && (
-                              <button
-                                className="text-xs text-amber-700 hover:underline"
-                                onClick={() => navigate(`/inspections/new?amend=${log.log_id}`)}
-                              >
-                                Amandemen
-                              </button>
-                            )}
-                          </div>
+                    <span className="text-xs text-gray-300">⚡</span>
+                  </div>
+                )
+              }
+              if (item._type === 'inspection') {
+                const log = item.data
+                const { canEdit, canAmend } = inspectionEligibility(log, user?.id, isManager)
+                return (
+                  <div key={`ins-${log.log_id ?? i}`} className="flex gap-3 items-start">
+                    <div className="mt-1 w-2 h-2 rounded-full flex-shrink-0 bg-blue-400" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium flex items-center gap-2 flex-wrap">
+                        {log.amends && <span className="text-xs text-amber-700">↳</span>}
+                        <span className="flex items-center gap-1 flex-wrap">
+                          <StatusChip label="AT" value={log.status_air_terminal} />
+                          <StatusChip label="DC" value={log.status_down_conductor} />
+                          <StatusChip label="GD" value={log.status_grounding} />
+                        </span>
+                        {log.amends && (
+                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Amandemen</span>
                         )}
-                      </div>
-                    )
-                  })()}
+                        {!log.amends && log.amendments && log.amendments.length > 0 && (
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                            Diamandemen ({log.amendments.length})
+                          </span>
+                        )}
+                        {log.photos && log.photos.length > 0 && (
+                          <span className="text-xs text-gray-500">📷 {log.photos.length}</span>
+                        )}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        {formatDateTime(log.tgl_inspeksi)}
+                        {log.user_nama && <> · {log.user_nama}</>}
+                      </p>
+                      {(canEdit || canAmend) && (
+                        <div className="flex gap-3 mt-1">
+                          {canEdit && (
+                            <button
+                              className="text-xs text-blue-600 hover:underline"
+                              onClick={() => navigate(`/inspections/new?edit=${log.log_id}`)}
+                            >
+                              Edit
+                            </button>
+                          )}
+                          {canAmend && (
+                            <button
+                              className="text-xs text-amber-700 hover:underline"
+                              onClick={() => navigate(`/inspections/new?amend=${log.log_id}`)}
+                            >
+                              Amandemen
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-300">📋</span>
+                  </div>
+                )
+              }
+              // audit entry
+              const a = item.data
+              return (
+                <div key={`aud-${a.audit_id ?? i}`} className="flex gap-3 items-start">
+                  <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${AUDIT_DOT[a.action] || 'bg-gray-400'}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm">
+                      <span className="font-medium text-gray-800">{a.actor_nama || a.actor_username || 'Sistem'}</span>{' '}
+                      <span className="text-gray-600">{AUDIT_LABEL[a.action] || a.action}</span>
+                      {a.note && <span className="text-gray-500"> — {a.note}</span>}
+                    </p>
+                    {a.diff && <CollapsibleDiff diff={a.diff} />}
+                    <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(a.created_at)}</p>
+                  </div>
+                  <span className="text-xs text-gray-300">🔧</span>
                 </div>
-                <span className="text-xs text-gray-300">{item.type === 'event' ? '⚡' : '📋'}</span>
-              </div>
-            ))}
+              )
+            })}
           </div>
-        )}
-      </div>
-
-      <IUIExplainer asset={asset} latestEvent={events[0]} />
-
-      {/* Audit timeline */}
-      <div className="card">
-        <h2 className="text-lg font-bold text-gray-800 mb-4">Riwayat Perubahan</h2>
-        {audits.length === 0 ? (
-          <p className="text-gray-400 text-sm">Belum ada perubahan tercatat.</p>
-        ) : (
-          <ul className="space-y-3">
-            {audits.map((a) => (
-              <li key={a.audit_id} className="flex gap-3 items-start">
-                <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${AUDIT_DOT[a.action] || 'bg-gray-400'}`} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm">
-                    <span className="font-medium text-gray-800">{a.actor_nama || a.actor_username || 'Sistem'}</span>{' '}
-                    <span className="text-gray-600">{AUDIT_LABEL[a.action] || a.action}</span>
-                    {a.note && <span className="text-gray-500"> — {a.note}</span>}
-                  </p>
-                  {a.diff && <DiffPreview diff={a.diff} />}
-                  <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(a.created_at)}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
         )}
       </div>
     </div>

@@ -32,8 +32,9 @@ const ACTION_STYLE = {
   delete:           { bg: 'bg-red-100 text-red-700',      label: 'memindah ke Tempat Sampah',      dot: '🔴' },
   restore:          { bg: 'bg-green-100 text-green-700',  label: 'memulihkan dari Tempat Sampah',  dot: '🟢' },
   purge:            { bg: 'bg-red-100 text-red-700',      label: 'menghapus laporan permanen',     dot: '🔴' },
-  verify:           { bg: 'bg-green-100 text-green-700',  label: 'memverifikasi laporan (permanen)', dot: '✓' },
-  request_revision: { bg: 'bg-amber-100 text-amber-700',  label: 'meminta revisi',                  dot: '⏵' },
+  verify:               { bg: 'bg-green-100 text-green-700',  label: 'memverifikasi laporan',   dot: '✓' },
+  request_revision:    { bg: 'bg-amber-100 text-amber-700',  label: 'meminta revisi',            dot: '⏵' },
+  revoke_verification: { bg: 'bg-orange-100 text-orange-700', label: 'mencabut verifikasi',       dot: '↩' },
 }
 
 function StatusChip({ label, value }) {
@@ -64,8 +65,15 @@ function DiffList({ diff }) {
 }
 
 function TimelineEntry({ entry, isLast }) {
+  const [expanded, setExpanded] = useState(false)
   const style = ACTION_STYLE[entry.action] || { bg: 'bg-gray-100 text-gray-600', label: entry.action, dot: '⚪' }
   const targetId = entry.diff?.target_log_id
+  const diffEntries = Object.entries(entry.diff || {}).filter(
+    ([k]) => k !== 'target_log_id' && k !== 'photo_id' && k !== 'legacy_migration' &&
+             k !== 'verified_at_before' && k !== 'verified_by_id_before' &&
+             k !== 'resolves_revision' && k !== 'prior_note'
+  )
+  const hasDiff = diffEntries.some(([, v]) => v && typeof v === 'object' && 'old' in v)
   return (
     <div className="flex gap-3">
       {/* Track line */}
@@ -90,7 +98,18 @@ function TimelineEntry({ entry, isLast }) {
           )}
         </p>
         <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(entry.at)}</p>
-        <DiffList diff={entry.diff || {}} />
+        {entry.note && (
+          <p className="text-xs text-gray-400 mt-0.5 italic">{entry.note}</p>
+        )}
+        {hasDiff && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-xs text-brand-700 hover:underline mt-1 block"
+          >
+            {expanded ? '▼ Sembunyikan detail' : '▶ Lihat detail'}
+          </button>
+        )}
+        {expanded && <DiffList diff={entry.diff || {}} />}
         {entry.diff?.photo_id && (
           <p className="text-xs text-gray-400 mt-1">ID Foto: {entry.diff.photo_id.slice(0, 8)}…</p>
         )}
@@ -101,9 +120,6 @@ function TimelineEntry({ entry, isLast }) {
           >
             Lihat log terkait →
           </Link>
-        )}
-        {entry.note && (
-          <p className="text-xs text-gray-400 mt-0.5 italic">{entry.note}</p>
         )}
       </div>
     </div>
@@ -118,8 +134,8 @@ function VerifyConfirmModal({ onConfirm, onCancel, loading }) {
         onClick={(e) => e.stopPropagation()}>
         <h3 className="text-lg font-bold text-gray-900 mb-2">Verifikasi Laporan?</h3>
         <p className="text-sm text-gray-600 mb-3">
-          Verifikasi bersifat <strong>permanen</strong> dan <strong>tidak dapat dibatalkan</strong>.
-          Setelah diverifikasi, laporan ini tidak dapat lagi diminta revisi atau dicabut verifikasinya.
+          Setelah diverifikasi, laporan ini <strong>tidak dapat lagi diedit langsung</strong>.
+          Jika perlu mengubah, Anda harus mencabut verifikasi terlebih dahulu.
         </p>
         <p className="text-sm text-gray-500 mb-4">Pastikan Anda sudah meninjau laporan dengan teliti.</p>
         <div className="flex gap-2">
@@ -176,6 +192,43 @@ function RevisionRequestModal({ existingNote, onConfirm, onCancel, loading }) {
   )
 }
 
+function RevokeVerificationModal({ onConfirm, onCancel, loading }) {
+  const [note, setNote] = useState('')
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-30 flex items-center justify-center p-4 animate-fade-in"
+      onClick={onCancel}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 animate-scale-in"
+        onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-bold text-gray-900 mb-2">Cabut Verifikasi?</h3>
+        <p className="text-sm text-gray-600 mb-3">
+          Verifikasi akan dicabut dan laporan kembali ke status <strong>Belum Terverifikasi</strong>.
+          Riwayat verifikasi sebelumnya tetap tercatat di timeline.
+        </p>
+        <textarea
+          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none"
+          rows={3}
+          maxLength={500}
+          placeholder="Tuliskan alasan pencabutan (opsional)…"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          autoFocus
+        />
+        <p className="text-xs text-gray-400 text-right mt-1">{note.length}/500</p>
+        <div className="flex gap-2 mt-3">
+          <button className="btn-secondary flex-1" onClick={onCancel} disabled={loading}>Batal</button>
+          <button
+            className="flex-1 text-sm font-medium px-3 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white transition-colors disabled:opacity-50"
+            onClick={() => onConfirm(note)}
+            disabled={loading}
+          >
+            {loading ? 'Mencabut…' : 'Cabut Verifikasi'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function DeleteConfirmModal({ log, onConfirm, onCancel }) {
   const purgeDate = new Date()
   purgeDate.setDate(purgeDate.getDate() + 7)
@@ -214,6 +267,7 @@ export default function LaporanDetail() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showVerifyModal, setShowVerifyModal] = useState(false)
   const [showRevisionModal, setShowRevisionModal] = useState(false)
+  const [showRevokeModal, setShowRevokeModal] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
 
   useEffect(() => {
@@ -238,10 +292,11 @@ export default function LaporanDetail() {
   const isDeleted   = !!log?.deleted_at
   const isVerified  = log?.verification_status === 'verified'
   const isRevisionRequested = log?.verification_status === 'revision_requested'
-  const canEdit     = !isDeleted && ((isOwn && inGrace && !isVerified) || isManager)
-  const canAmend    = !isDeleted && !log?.amends && ((isOwn && !isVerified) || isManager)
-  const canVerify   = isManager && !isDeleted && !isVerified
-  const canRequestRevision = isManager && !isDeleted && !isVerified
+  const canEdit              = !isDeleted && !isVerified && ((isOwn && inGrace) || isManager)
+  const canAmend             = !isDeleted && !log?.amends && ((isOwn && !isVerified) || isManager)
+  const canVerify            = isManager && !isDeleted && !isVerified
+  const canRequestRevision   = isManager && !isDeleted && !isVerified
+  const canRevokeVerification = isManager && !isDeleted && isVerified
 
   const handleDelete = async () => {
     setActionLoading(true)
@@ -298,6 +353,22 @@ export default function LaporanDetail() {
       const errData = err?.response?.data
       setError(errData?.note?.[0] || errData?.detail || 'Gagal mengirim permintaan revisi')
       setShowRevisionModal(false)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleRevokeVerification = async (note) => {
+    setActionLoading(true)
+    try {
+      const res = await client.post(`/inspections/${id}/revoke_verification/`, note ? { note } : {})
+      setLog(res.data)
+      setShowRevokeModal(false)
+      const auditRes = await client.get(`/inspections/${id}/audit/`)
+      setAudit(Array.isArray(auditRes.data) ? auditRes.data : auditRes.data.results || [])
+    } catch (err) {
+      setError(err?.response?.data?.detail || 'Gagal mencabut verifikasi')
+      setShowRevokeModal(false)
     } finally {
       setActionLoading(false)
     }
@@ -393,8 +464,17 @@ export default function LaporanDetail() {
             )}
             {!isManager && isVerified && (
               <span className="text-xs text-gray-400 italic">
-                ℹ Laporan ini sudah terverifikasi. Hanya Manajer yang dapat melakukan perubahan.
+                ℹ Laporan ini sudah terverifikasi. Hubungi Manajer jika ada perubahan.
               </span>
+            )}
+            {canRevokeVerification && (
+              <button
+                className="text-sm font-medium px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white transition-colors"
+                onClick={() => setShowRevokeModal(true)}
+                disabled={actionLoading}
+              >
+                Cabut Verifikasi
+              </button>
             )}
             {canVerify && (
               <button
@@ -508,10 +588,7 @@ export default function LaporanDetail() {
       <div className="card space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="font-semibold text-gray-800">Status Verifikasi</h2>
-          <VerificationChip
-            status={log?.verification_status}
-            editedAfter={log?.edited_after_verification}
-          />
+          <VerificationChip status={log?.verification_status} />
         </div>
 
         {isVerified && (
@@ -522,12 +599,6 @@ export default function LaporanDetail() {
               {' · '}
               {timeAgo(log.verified_at)}
             </p>
-            {log.edited_after_verification && (
-              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                ⚠ Laporan ini telah diedit setelah diverifikasi pada {formatDateTime(log.verified_at)}.
-                Stempel verifikasi tidak dapat dicabut dan tetap berlaku, namun konten saat ini mungkin sudah berubah dari yang diverifikasi.
-              </p>
-            )}
           </div>
         )}
 
@@ -589,6 +660,13 @@ export default function LaporanDetail() {
           existingNote={isRevisionRequested ? log.revision_request_note : ''}
           onConfirm={handleRequestRevision}
           onCancel={() => setShowRevisionModal(false)}
+          loading={actionLoading}
+        />
+      )}
+      {showRevokeModal && (
+        <RevokeVerificationModal
+          onConfirm={handleRevokeVerification}
+          onCancel={() => setShowRevokeModal(false)}
           loading={actionLoading}
         />
       )}

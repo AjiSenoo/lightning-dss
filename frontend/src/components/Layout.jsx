@@ -8,16 +8,16 @@ import { useAuth, useIsManager } from '../auth/AuthContext'
 
 const BASE_NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: '🏠', end: true },
-  { to: '/assets', label: 'Portofolio Aset', icon: '🏗️' },
-  { to: '/inspections', label: 'Riwayat Inspeksi', icon: '📋' },
-  { to: '/events', label: 'Riwayat Sambaran', icon: '🌩️' },
+  { to: '/assets', label: 'Portofolio Aset', icon: '🏗️', end: true },
+  { to: '/inspections', label: 'Riwayat Inspeksi', icon: '📋', end: true },
+  { to: '/events', label: 'Riwayat Sambaran', icon: '🌩️', end: true },
   { to: '/inspections/new', label: 'Input Logbook', icon: '✏️' },
   { to: '/events/new', label: 'Input Kejadian', icon: '⚡' },
 ]
 
 const MANAGER_NAV_ITEMS = [
-  { to: '/users', label: 'Manajemen Pengguna', icon: '👥' },
-  { to: '/inspections/trash', label: 'Tempat Sampah', icon: '🗑️' },
+  { to: '/users', label: 'Manajemen Pengguna', icon: '👥', end: true },
+  { to: '/inspections/trash', label: 'Tempat Sampah', icon: '🗑️', end: true },
 ]
 
 function getInitials(user) {

@@ -111,6 +111,10 @@ export default function LogbookForm() {
       .then((res) => {
         if (cancelled) return
         const log = res.data
+        if (mode === 'edit' && log.verified_at) {
+          if (!cancelled) setLoadError('Laporan ini sudah terverifikasi. Cabut verifikasi terlebih dahulu untuk mengedit.')
+          return
+        }
         setSourceLog(log)
         setSelectedAssetId(log.asset || '')
         setEventId(log.event || '')

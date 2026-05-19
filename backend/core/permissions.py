@@ -57,12 +57,14 @@ class IsOwnerOrManagerWithGrace(permissions.BasePermission):
         # Technician: must be the owner
         if obj.user_id != request.user.id:
             return False
-        # Once verified, a teknisi can no longer modify — manager only
+        # POST custom actions (amend, etc.) — view-level guards handle business rules
+        if request.method == 'POST':
+            return True
+        # DELETE: manager only
+        if request.method == 'DELETE':
+            return False
+        # PUT / PATCH — blocked if verified; only within grace window
         if obj.verified_at is not None:
             return False
-        if request.method == 'DELETE':
-            # Hard delete restricted to managers
-            return False
-        # PUT / PATCH — only within grace window
         grace = timedelta(minutes=settings.INSPECTION_EDIT_GRACE_MINUTES)
         return (timezone.now() - obj.created_at) < grace

@@ -196,7 +196,7 @@ class InspectionLog(models.Model):
         'User', on_delete=models.SET_NULL, null=True, blank=True, related_name='inspections_deleted'
     )
 
-    # Verification fields — verified_at is terminal (no unverify)
+    # Verification fields — verified_at can be revoked via revoke_verification action
     verified_at = models.DateTimeField(null=True, blank=True, db_index=True)
     verified_by = models.ForeignKey(
         'User', on_delete=models.SET_NULL, null=True, blank=True, related_name='inspections_verified'
@@ -216,16 +216,17 @@ class InspectionLog(models.Model):
 
 
 AUDIT_ACTIONS = [
-    ('create',           'Created'),
-    ('update',           'Edited'),
-    ('amend',            'Amended'),
-    ('amended_by',       'Amended By'),
-    ('photo_added',      'Photo Added'),
-    ('delete',           'Soft-deleted'),
-    ('restore',          'Restored'),
-    ('purge',            'Hard-deleted'),
-    ('verify',           'Verified'),
-    ('request_revision', 'Revision Requested'),
+    ('create',              'Created'),
+    ('update',              'Edited'),
+    ('amend',               'Amended'),
+    ('amended_by',          'Amended By'),
+    ('photo_added',         'Photo Added'),
+    ('delete',              'Soft-deleted'),
+    ('restore',             'Restored'),
+    ('purge',               'Hard-deleted'),
+    ('verify',              'Verified'),
+    ('request_revision',    'Revision Requested'),
+    ('revoke_verification', 'Verification Revoked'),
 ]
 
 
@@ -293,19 +294,20 @@ class InspectionPhoto(models.Model):
 
 
 NOTIFICATION_VERBS = [
-    ('create',           'Created'),
-    ('update',           'Edited'),
-    ('amend',            'Amended'),
-    ('delete',           'Soft-deleted'),
-    ('restore',          'Restored'),
-    ('lightning',        'Lightning recorded'),
-    ('stale_asset',      'Asset overdue for inspection'),
-    ('verify',           'Verified'),
-    ('request_revision', 'Revision Requested'),
-    ('asset_create',     'Asset Created'),
-    ('asset_update',     'Asset Edited'),
-    ('asset_delete',     'Asset Soft-deleted'),
-    ('asset_restore',    'Asset Restored'),
+    ('create',              'Created'),
+    ('update',              'Edited'),
+    ('amend',               'Amended'),
+    ('delete',              'Soft-deleted'),
+    ('restore',             'Restored'),
+    ('lightning',           'Lightning recorded'),
+    ('stale_asset',         'Asset overdue for inspection'),
+    ('verify',              'Verified'),
+    ('request_revision',    'Revision Requested'),
+    ('revoke_verification', 'Verification Revoked'),
+    ('asset_create',        'Asset Created'),
+    ('asset_update',        'Asset Edited'),
+    ('asset_delete',        'Asset Soft-deleted'),
+    ('asset_restore',       'Asset Restored'),
 ]
 
 
