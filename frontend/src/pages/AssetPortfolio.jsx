@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getHealthStatus, LPL_LABELS, formatDate } from '../utils/constants'
+import { LPL_LABELS, formatDate, HEALTH_BAND_HEX, HEALTH_BAND_LABEL, scoreToBand } from '../utils/constants'
 import cacheStore from '../offline/cacheStore'
 import { useIsManager } from '../auth/AuthContext'
 import AssetForm from '../components/AssetForm'
@@ -107,8 +107,10 @@ export default function AssetPortfolio() {
       ) : (
         <div className="grid gap-3">
           {filtered.map((asset, i) => {
-            const color = getHealthStatus(asset.skor_kesehatan_aset)
-            const pct = Math.round((asset.skor_kesehatan_aset ?? 0) * 100)
+            const ahiScore = asset.ahi_breakdown?.ahi_safety ?? asset.skor_kesehatan_aset
+            const band     = scoreToBand(ahiScore)
+            const hex      = HEALTH_BAND_HEX[band]
+            const pct      = Math.round((ahiScore ?? 0) * 100)
             return (
               <div
                 key={asset.asset_id}
@@ -126,19 +128,19 @@ export default function AssetPortfolio() {
                     <p className="text-xs text-gray-500">{LPL_LABELS[asset.lpl_grade]}</p>
                   </div>
 
-                  {/* Health bar */}
+                  {/* Health bar — driven by AHI_safety */}
                   <div className="w-36">
                     <div className="flex justify-between text-xs mb-1">
-                      <span className="text-gray-500">Kesehatan</span>
-                      <span className="font-bold" style={{ color: color.bg }}>{pct}%</span>
+                      <span className="text-gray-500">{HEALTH_BAND_LABEL[band]}</span>
+                      <span className="font-bold" style={{ color: hex }}>{pct}%</span>
                     </div>
                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                       <div
                         className="h-full rounded-full transition-all"
                         style={{
                           width: `${pct}%`,
-                          background: `linear-gradient(90deg, ${color.bg}, ${color.bg}dd)`,
-                          boxShadow: `0 0 6px ${color.bg}40`,
+                          background: `linear-gradient(90deg, ${hex}, ${hex}dd)`,
+                          boxShadow: `0 0 6px ${hex}40`,
                         }}
                       />
                     </div>

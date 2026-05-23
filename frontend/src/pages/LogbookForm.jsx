@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { COMPONENT_OPTIONS, LPL_LABELS, getHealthStatus, formatDateTime } from '../utils/constants'
+import { COMPONENT_OPTIONS, LPL_LABELS, formatDateTime, HEALTH_BAND_HEX, HEALTH_BAND_LABEL, scoreToBand } from '../utils/constants'
 import useOfflineSubmit from '../hooks/useOfflineSubmit'
 import cacheStore from '../offline/cacheStore'
 import client from '../api/client'
@@ -9,6 +9,18 @@ const NON_OK = {
   status_air_terminal: (v) => v !== 'OK',
   status_down_conductor: (v) => v !== 'OK',
   status_grounding: (v) => v !== 'OK',
+}
+
+function AHIChip({ ahi }) {
+  if (ahi == null) return null
+  const band = scoreToBand(ahi)
+  const hex  = HEALTH_BAND_HEX[band]
+  return (
+    <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+          style={{ backgroundColor: `${hex}20`, color: hex }}>
+      {HEALTH_BAND_LABEL[band]} · {Math.round(ahi * 100)}%
+    </span>
+  )
 }
 
 async function compressImage(file, maxKB = 500) {
@@ -201,10 +213,10 @@ export default function LogbookForm() {
 
   if (result) {
     const before = result.health_before ?? 0
-    const after = result.health_after ?? 0
-    const delta = after - before
-    const colorBefore = getHealthStatus(before)
-    const colorAfter = getHealthStatus(after)
+    const after  = result.health_after  ?? 0
+    const delta  = after - before
+    const hexBefore = HEALTH_BAND_HEX[scoreToBand(before)]
+    const hexAfter  = HEALTH_BAND_HEX[scoreToBand(after)]
 
     return (
       <div className="max-w-lg mx-auto space-y-6">
@@ -220,16 +232,18 @@ export default function LogbookForm() {
           <div className="flex items-center justify-center gap-6">
             <div>
               <p className="text-xs text-gray-400 mb-1">Sebelum</p>
-              <p className="text-3xl font-bold" style={{ color: colorBefore.bg }}>
+              <p className="text-3xl font-bold" style={{ color: hexBefore }}>
                 {Math.round(before * 100)}%
               </p>
+              <p className="text-xs mt-1" style={{ color: hexBefore }}>{HEALTH_BAND_LABEL[scoreToBand(before)]}</p>
             </div>
             <p className="text-2xl text-gray-400">→</p>
             <div>
               <p className="text-xs text-gray-400 mb-1">Sesudah</p>
-              <p className="text-3xl font-bold" style={{ color: colorAfter.bg }}>
+              <p className="text-3xl font-bold" style={{ color: hexAfter }}>
                 {Math.round(after * 100)}%
               </p>
+              <p className="text-xs mt-1" style={{ color: hexAfter }}>{HEALTH_BAND_LABEL[scoreToBand(after)]}</p>
             </div>
           </div>
           <p className="text-sm text-gray-600">
@@ -332,7 +346,10 @@ export default function LogbookForm() {
           <h2 className="font-semibold text-gray-700">Komponen Wajib</h2>
 
           <div>
-            <p className="text-sm font-medium text-gray-700 mb-2">🔩 Air Terminal</p>
+            <div className="flex items-center gap-2 mb-2">
+              <p className="text-sm font-medium text-gray-700">🔩 Air Terminal</p>
+              <AHIChip ahi={selectedAsset?.ahi_breakdown?.per_component?.AT?.ahi} />
+            </div>
             <RadioCards
               options={COMPONENT_OPTIONS.air_terminal}
               value={form.status_air_terminal}
@@ -340,7 +357,10 @@ export default function LogbookForm() {
             />
           </div>
           <div>
-            <p className="text-sm font-medium text-gray-700 mb-2">🔧 Down Conductor</p>
+            <div className="flex items-center gap-2 mb-2">
+              <p className="text-sm font-medium text-gray-700">🔧 Down Conductor</p>
+              <AHIChip ahi={selectedAsset?.ahi_breakdown?.per_component?.DC?.ahi} />
+            </div>
             <RadioCards
               options={COMPONENT_OPTIONS.down_conductor}
               value={form.status_down_conductor}
@@ -348,7 +368,10 @@ export default function LogbookForm() {
             />
           </div>
           <div>
-            <p className="text-sm font-medium text-gray-700 mb-2">⚡ Grounding</p>
+            <div className="flex items-center gap-2 mb-2">
+              <p className="text-sm font-medium text-gray-700">⚡ Grounding</p>
+              <AHIChip ahi={selectedAsset?.ahi_breakdown?.per_component?.GR?.ahi} />
+            </div>
             <RadioCards
               options={COMPONENT_OPTIONS.grounding}
               value={form.status_grounding}

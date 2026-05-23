@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { MapContainer, CircleMarker, Popup, useMap } from 'react-leaflet'
 import { tileLayerOffline, savetiles } from 'leaflet.offline'
 import { useNavigate } from 'react-router-dom'
-import { getHealthStatus, formatDate } from '../utils/constants'
+import { HEALTH_BAND_HEX, HEALTH_BAND_LABEL, scoreToBand, formatDate } from '../utils/constants'
 
 const OSM_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
 const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -133,7 +133,9 @@ export default function AssetMap({ assets = [], height = '400px' }) {
             .map((s) => parseFloat(s.trim()))
           if (isNaN(lat) || isNaN(lng)) return null
 
-          const color = getHealthStatus(asset.skor_kesehatan_aset)
+          const band = asset.health_band ?? scoreToBand(asset.ahi_safety ?? asset.skor_kesehatan_aset)
+          const hex  = HEALTH_BAND_HEX[band] ?? HEALTH_BAND_HEX.neutral
+          const displayScore = asset.ahi_safety ?? asset.skor_kesehatan_aset
 
           return (
             <CircleMarker
@@ -141,8 +143,8 @@ export default function AssetMap({ assets = [], height = '400px' }) {
               center={[lat, lng]}
               radius={12}
               pathOptions={{
-                color: color.bg,
-                fillColor: color.bg,
+                color: hex,
+                fillColor: hex,
                 fillOpacity: 0.85,
                 weight: 2,
               }}
@@ -153,9 +155,9 @@ export default function AssetMap({ assets = [], height = '400px' }) {
                   <p className="text-xs text-gray-500">LPL {asset.lpl_grade}</p>
                   <div className="mt-2 space-y-1 text-xs">
                     <div className="flex justify-between">
-                      <span>Kesehatan:</span>
-                      <span className="font-semibold" style={{ color: color.bg }}>
-                        {Math.round((asset.skor_kesehatan_aset ?? 0) * 100)}%
+                      <span>Kondisi:</span>
+                      <span className="font-semibold" style={{ color: hex }}>
+                        {HEALTH_BAND_LABEL[band]} · {Math.round((displayScore ?? 0) * 100)}%
                       </span>
                     </div>
                     <div className="flex justify-between">

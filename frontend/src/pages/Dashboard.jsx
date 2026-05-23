@@ -5,7 +5,7 @@ import AssetMap from '../components/AssetMap'
 import { UrgencyBadge } from '../components/StatusBadge'
 import { SkeletonStat, SkeletonRow } from '../components/Skeleton'
 import EmptyState from '../components/EmptyState'
-import { formatDateTime, formatDate, getHealthStatus } from '../utils/constants'
+import { formatDateTime, formatDate, HEALTH_BAND_HEX, HEALTH_BAND_LABEL, scoreToBand } from '../utils/constants'
 import cacheStore from '../offline/cacheStore'
 import { useIsManager } from '../auth/AuthContext'
 
@@ -67,8 +67,10 @@ function StatCard({ title, value, icon, accent = 'brand', sparkData }) {
 }
 
 function CriticalAssetCard({ asset, onClick }) {
-  const color = getHealthStatus(asset.skor_kesehatan_aset)
-  const pct = Math.round(asset.skor_kesehatan_aset * 100)
+  const ahiScore = asset.ahi_safety ?? asset.ahi_breakdown?.ahi_safety ?? asset.skor_kesehatan_aset
+  const band     = scoreToBand(ahiScore)
+  const hex      = HEALTH_BAND_HEX[band]
+  const pct      = Math.round((ahiScore ?? 0) * 100)
   return (
     <button
       onClick={onClick}
@@ -81,7 +83,7 @@ function CriticalAssetCard({ asset, onClick }) {
         </div>
         <span
           className="text-xs font-bold px-2 py-1 rounded-full"
-          style={{ backgroundColor: `${color.bg}20`, color: color.bg }}
+          style={{ backgroundColor: `${hex}20`, color: hex }}
         >
           {pct}%
         </span>
@@ -91,11 +93,11 @@ function CriticalAssetCard({ asset, onClick }) {
           className="h-full rounded-full transition-all"
           style={{
             width: `${pct}%`,
-            background: `linear-gradient(90deg, ${color.bg}, ${color.bg}cc)`,
+            background: `linear-gradient(90deg, ${hex}, ${hex}cc)`,
           }}
         />
       </div>
-      <p className="text-xs text-gray-400 mt-2">{color.label}</p>
+      <p className="text-xs text-gray-400 mt-2">{HEALTH_BAND_LABEL[band]}</p>
     </button>
   )
 }

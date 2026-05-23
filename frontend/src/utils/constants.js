@@ -12,6 +12,27 @@ export const getHealthStatus = (score) => {
   return STATUS_COLORS.bahaya
 }
 
+// Four-band system per IEC 62305-1 / CIGRE TB 858 (AHI_safety thresholds)
+export const HEALTH_BAND_HEX = {
+  hijau:   '#22C55E',  // ≥ 0.85
+  oranye:  '#FB923C',  // 0.70–0.85
+  merah:   '#EF4444',  // 0.50–0.70
+  ungu:    '#9333EA',  // < 0.50
+  neutral: '#9CA3AF',
+}
+
+export const HEALTH_BAND_LABEL = {
+  hijau: 'Baik', oranye: 'Waspada', merah: 'Bahaya', ungu: 'Kritis', neutral: 'Belum Ada Data',
+}
+
+export const scoreToBand = (score) => {
+  if (score === null || score === undefined) return 'neutral'
+  if (score >= 0.85) return 'hijau'
+  if (score >= 0.70) return 'oranye'
+  if (score >= 0.50) return 'merah'
+  return 'ungu'
+}
+
 export const getUrgencyStatus = (iui) => {
   if (iui === null || iui === undefined) return STATUS_COLORS.neutral
   if (iui < 35) return STATUS_COLORS.aman
