@@ -1,6 +1,10 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
-from .models import AssetRegistry, AssetAudit, LightningEvent, InspectionLog, InspectionLogAudit, InspectionPhoto, Notification, User, Organization
+from .models import (
+    AssetRegistry, AssetAudit, LightningEvent, InspectionLog, InspectionLogAudit,
+    InspectionPhoto, Notification, User, Organization,
+    AssetComponent, InspectionComponentStatus, ComponentMaintenanceAction,
+)
 
 
 @admin.register(Organization)
@@ -37,6 +41,29 @@ class InspectionLogAdmin(admin.ModelAdmin):
     list_display = ['asset', 'tgl_inspeksi', 'status_air_terminal', 'status_down_conductor', 'status_grounding', 'amends', 'verified_at', 'deleted_at']
     list_filter = ['status_air_terminal', 'status_grounding', ('verified_at', admin.EmptyFieldListFilter), 'deleted_at']
     readonly_fields = ['log_id', 'created_at', 'updated_at']
+
+
+@admin.register(AssetComponent)
+class AssetComponentAdmin(admin.ModelAdmin):
+    list_display = ['asset', 'component_type', 'install_date', 'end_date', 'replaced_by', 'deleted_at']
+    list_filter = ['component_type', ('end_date', admin.EmptyFieldListFilter), ('deleted_at', admin.EmptyFieldListFilter)]
+    search_fields = ['asset__nama_gedung']
+    readonly_fields = ['component_id', 'created_at', 'updated_at']
+
+
+@admin.register(InspectionComponentStatus)
+class InspectionComponentStatusAdmin(admin.ModelAdmin):
+    list_display = ['inspection', 'component', 'status', 'measurement', 'created_at']
+    list_filter = ['status']
+    readonly_fields = ['id', 'created_at']
+
+
+@admin.register(ComponentMaintenanceAction)
+class ComponentMaintenanceActionAdmin(admin.ModelAdmin):
+    list_display = ['asset', 'component', 'action', 'performed_at', 'performed_by']
+    list_filter = ['action']
+    search_fields = ['asset__nama_gedung']
+    readonly_fields = ['action_id', 'created_at']
 
 
 @admin.register(InspectionLogAudit)

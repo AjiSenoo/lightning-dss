@@ -1,3 +1,4 @@
+import datetime
 import uuid
 from django.contrib.auth.models import AbstractUser
 from django.db import models
@@ -75,6 +76,27 @@ ROLE_CHOICES = [
 ]
 
 
+COMPONENT_TYPE_CHOICES = [
+    ('AT', 'Air Terminal'),
+    ('DC', 'Down Conductor'),
+    ('GR', 'Grounding Electrode'),
+]
+
+# Per-component-type allowed status values; mirrors the flat-field choices above
+# so backfill from InspectionLog round-trips losslessly.
+COMPONENT_STATUS_CHOICES_BY_TYPE = {
+    'AT': AIR_TERMINAL_STATUS,
+    'DC': DOWN_CONDUCTOR_STATUS,
+    'GR': GROUNDING_STATUS,
+}
+
+MAINTENANCE_ACTION_CHOICES = [
+    ('install', 'Install'),
+    ('repair', 'Repair'),
+    ('replace', 'Replace'),
+]
+
+
 class AssetRegistry(models.Model):
     asset_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(
@@ -99,8 +121,22 @@ class AssetRegistry(models.Model):
     )
 
     def save(self, *args, **kwargs):
+        is_new = self._state.adding
         self.kapasitas_desain_ka = LPL_CAPACITY_MAP.get(self.lpl_grade, 100)
         super().save(*args, **kwargs)
+        if is_new:
+            self._ensure_default_components()
+
+    def _ensure_default_components(self):
+        install_date = datetime.date(self.tahun_instalasi, 1, 1)
+        for ct in ('AT', 'DC', 'GR'):
+            exists = self.components.filter(
+                component_type=ct, end_date__isnull=True, deleted_at__isnull=True
+            ).exists()
+            if not exists:
+                AssetComponent.objects.create(
+                    asset=self, component_type=ct, install_date=install_date,
+                )
 
     class Meta:
         db_table = 'asset_registry'
@@ -182,6 +218,9 @@ class InspectionLog(models.Model):
     # Evidence
     catatan_teknisi = models.TextField(blank=True, default='')
 
+    # Health score snapshot recorded by the feedback loop after this inspection was submitted.
+    health_after = models.FloatField(null=True, blank=True)
+
     # Amendment chain — corrections after the 5-min grace window create new logs that link here.
     amends = models.ForeignKey(
         'self', on_delete=models.PROTECT, null=True, blank=True, related_name='amendments'
@@ -213,6 +252,40 @@ class InspectionLog(models.Model):
 
     def __str__(self):
         return f"Inspection on {self.asset.nama_gedung} ({self.tgl_inspeksi.date()})"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.deleted_at is None:
+            self._sync_component_statuses()
+
+    # Mirror flat status_* fields into InspectionComponentStatus rows so the AHI engine
+    # (post-Phase 2) can read from the per-component table consistently. Idempotent via
+    # update_or_create. Removed when the frontend stops writing the flat fields.
+    def _sync_component_statuses(self):
+        field_map = {
+            'AT': ('status_air_terminal', None),
+            'DC': ('status_down_conductor', None),
+            'GR': ('status_grounding', 'resistansi_grounding_ohm'),
+        }
+        active_components = {
+            c.component_type: c
+            for c in self.asset.components.filter(
+                end_date__isnull=True, deleted_at__isnull=True
+            )
+        }
+        for ct, (status_field, measurement_field) in field_map.items():
+            component = active_components.get(ct)
+            if component is None:
+                continue
+            status_value = getattr(self, status_field, '') or ''
+            if not status_value:
+                continue
+            measurement = getattr(self, measurement_field) if measurement_field else None
+            InspectionComponentStatus.objects.update_or_create(
+                inspection=self,
+                component=component,
+                defaults={'status': status_value, 'measurement': measurement},
+            )
 
 
 AUDIT_ACTIONS = [
@@ -329,3 +402,88 @@ class Notification(models.Model):
 
     def __str__(self):
         return f'Notif {self.verb} → {self.recipient_id}'
+
+
+class AssetComponent(models.Model):
+    """
+    A physical component of an LPS asset (Air Terminal, Down Conductor, Grounding Electrode).
+    Replacements create a new row and end-date the predecessor — the chain reconstructs
+    "which component was installed at the time of a strike" for per-component stress accrual.
+    """
+    component_id        = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset               = models.ForeignKey(AssetRegistry, on_delete=models.PROTECT, related_name='components')
+    component_type      = models.CharField(max_length=2, choices=COMPONENT_TYPE_CHOICES)
+    install_date        = models.DateField(help_text="Resets the stress and age clock on replacement")
+    end_date            = models.DateField(null=True, blank=True, db_index=True,
+                                           help_text="Set when superseded; null = currently installed")
+    replaced_by         = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True,
+                                            related_name='replaces')
+    design_capacity_ka  = models.FloatField(null=True, blank=True,
+                                            help_text="Optional override; null → inherit from asset LPL")
+    catatan             = models.TextField(blank=True, default='')
+    created_at          = models.DateTimeField(auto_now_add=True)
+    updated_at          = models.DateTimeField(auto_now=True)
+    deleted_at          = models.DateTimeField(null=True, blank=True, db_index=True)
+    deleted_by          = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True,
+                                            related_name='components_deleted')
+
+    class Meta:
+        db_table = 'asset_components'
+        ordering = ['asset', 'component_type', '-install_date']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['asset', 'component_type'],
+                condition=models.Q(end_date__isnull=True, deleted_at__isnull=True),
+                name='one_active_component_per_type_per_asset',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.get_component_type_display()} on {self.asset.nama_gedung} (installed {self.install_date})'
+
+
+class InspectionComponentStatus(models.Model):
+    """
+    Per-inspection, per-component status. Replaces the flat status_* fields on InspectionLog
+    in the new model. Backward-compat: the flat fields are mirrored during transition.
+    """
+    id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    inspection  = models.ForeignKey(InspectionLog, on_delete=models.CASCADE, related_name='component_statuses')
+    component   = models.ForeignKey(AssetComponent, on_delete=models.PROTECT, related_name='status_history')
+    status      = models.CharField(max_length=20, help_text="Values constrained per component_type")
+    measurement = models.FloatField(null=True, blank=True,
+                                    help_text="e.g. resistansi_grounding_ohm for GR")
+    catatan     = models.TextField(blank=True, default='')
+    created_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'inspection_component_statuses'
+        ordering = ['inspection', 'component']
+        unique_together = [('inspection', 'component')]
+
+    def __str__(self):
+        return f'{self.component.get_component_type_display()} = {self.status} @ {self.inspection_id}'
+
+
+class ComponentMaintenanceAction(models.Model):
+    """
+    A maintenance event on a component: install (initial), repair, or replace.
+    A 'replace' action atomically creates the new AssetComponent row and end-dates the prior one
+    (handled in the serializer/view layer).
+    """
+    action_id    = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset        = models.ForeignKey(AssetRegistry, on_delete=models.PROTECT, related_name='maintenance_actions')
+    component    = models.ForeignKey(AssetComponent, on_delete=models.PROTECT, related_name='maintenance_actions')
+    action       = models.CharField(max_length=10, choices=MAINTENANCE_ACTION_CHOICES)
+    performed_at = models.DateTimeField()
+    performed_by = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True,
+                                     related_name='maintenance_actions')
+    notes        = models.TextField(blank=True, default='')
+    created_at   = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'component_maintenance_actions'
+        ordering = ['-performed_at']
+
+    def __str__(self):
+        return f'{self.action} on {self.component} at {self.performed_at}'
