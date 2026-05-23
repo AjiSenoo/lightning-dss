@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 
-import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer } from 'recharts'
 import StrikeChart from '../components/StrikeChart'
 import HealthTrend from '../components/HealthTrend'
 import { HealthGaugeInline } from '../components/HealthGauge'
 import { UrgencyBadge } from '../components/StatusBadge'
 import AssetForm from '../components/AssetForm'
-import { LPL_LABELS, formatDate, formatDateTime, getHealthStatus, timeAgo } from '../utils/constants'
+import { LPL_LABELS, formatDateTime, getHealthStatus, timeAgo } from '../utils/constants'
 import cacheStore from '../offline/cacheStore'
 import client from '../api/client'
 import { useAuth, useIsManager } from '../auth/AuthContext'
@@ -15,19 +14,23 @@ import { useAuth, useIsManager } from '../auth/AuthContext'
 const GRACE_MS = 5 * 60 * 1000
 
 const AUDIT_DOT = {
-  create:  'bg-green-500',
-  update:  'bg-blue-500',
-  delete:  'bg-red-400',
-  restore: 'bg-brand-500',
-  purge:   'bg-gray-400',
+  create:   'bg-green-500',
+  update:   'bg-blue-500',
+  delete:   'bg-red-400',
+  restore:  'bg-brand-500',
+  purge:    'bg-gray-400',
+  replaced: 'bg-purple-500',
+  replaces: 'bg-purple-400',
 }
 
 const AUDIT_LABEL = {
-  create:  'menambahkan aset',
-  update:  'mengedit aset',
-  delete:  'memindah ke Tempat Sampah',
-  restore: 'memulihkan aset',
-  purge:   'menghapus permanen',
+  create:   'menambahkan aset',
+  update:   'mengedit aset',
+  delete:   'memindah ke Tempat Sampah',
+  restore:  'memulihkan aset',
+  purge:    'menghapus permanen',
+  replaced: 'mengganti aset ini dengan aset baru',
+  replaces: 'menggantikan aset sebelumnya',
 }
 
 function StatusChip({ label, value }) {
@@ -76,6 +79,26 @@ function CollapsibleDiff({ diff }) {
   )
 }
 
+const COMPONENT_LABELS = { AT: 'Air Terminal', DC: 'Down Conductor', GR: 'Grounding Electrode' }
+const ACTION_LABELS    = { replace: 'Ganti', repair: 'Perbaiki', inspect: 'Periksa', monitor: 'Pantau', install: 'Pasang' }
+const HORIZON_LABELS   = { immediate: 'Segera', within_1_month: '≤ 1 Bulan', within_6_months: '≤ 6 Bulan', next_cycle: 'Siklus Berikutnya' }
+const DRIVER_LABELS    = { stress: 'Stres Kumulatif', physical: 'Kondisi Fisik', age: 'Umur Kalender', corrosion: 'Korosi Tanah' }
+const MAINT_ACTIONS    = ['install', 'repair', 'replace']
+
+const BAND_INFO = {
+  hijau:  { bar: 'bg-green-500',   badge: 'bg-green-100 text-green-800',   label: 'Baik' },
+  oranye: { bar: 'bg-orange-400',  badge: 'bg-orange-100 text-orange-800', label: 'Waspada' },
+  merah:  { bar: 'bg-red-500',     badge: 'bg-red-100 text-red-800',       label: 'Bahaya' },
+  ungu:   { bar: 'bg-purple-600',  badge: 'bg-purple-100 text-purple-800', label: 'Kritis' },
+}
+
+function ahiBand(score) {
+  if (score >= 0.85) return 'hijau'
+  if (score >= 0.70) return 'oranye'
+  if (score >= 0.50) return 'merah'
+  return 'ungu'
+}
+
 function inspectionEligibility(log, currentUserId, isManager) {
   const isOwn = currentUserId && log.user === currentUserId
   const inGrace = log.created_at && (Date.now() - new Date(log.created_at).getTime()) < GRACE_MS
@@ -96,17 +119,31 @@ export default function AssetDetail() {
   const [showEdit, setShowEdit] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [restoring, setRestoring] = useState(false)
+  const [componentMap, setComponentMap] = useState({})
+  const [allComponents, setAllComponents] = useState([])
+  const [maintenanceHistory, setMaintenanceHistory] = useState([])
+  const [maintenanceModal, setMaintenanceModal] = useState(null)
+  const [replaceModal, setReplaceModal] = useState(null)
 
   const load = async () => {
     setLoading(true)
-    const [assetResult, histResult, auditRes] = await Promise.all([
+    const [assetResult, histResult, auditRes, compsRes, maintRes] = await Promise.all([
       cacheStore.getAsset(id),
       cacheStore.getAssetHistory(id),
       client.get(`/assets/${id}/audits/`).catch(() => ({ data: [] })),
+      client.get(`/components/?asset=${id}&active=false`).catch(() => ({ data: [] })),
+      client.get(`/maintenance-actions/?asset=${id}`).catch(() => ({ data: [] })),
     ])
     setAsset(assetResult.data)
     setHistory(histResult.data || [])
     setAudits(auditRes.data || [])
+    const rawComps = Array.isArray(compsRes.data) ? compsRes.data : (compsRes.data?.results ?? [])
+    setAllComponents(rawComps)
+    const map = {}
+    rawComps.filter((c) => !c.end_date).forEach((c) => { map[c.component_type] = c.component_id })
+    setComponentMap(map)
+    const rawMaint = Array.isArray(maintRes.data) ? maintRes.data : (maintRes.data?.results ?? [])
+    setMaintenanceHistory(rawMaint)
     setLoading(false)
   }
 
@@ -140,6 +177,44 @@ export default function AssetDetail() {
     }
   }
 
+  const handleCreateMaintenance = async () => {
+    const m = maintenanceModal
+    setMaintenanceModal((prev) => ({ ...prev, saving: true }))
+    try {
+      await client.post('/maintenance-actions/', {
+        asset: id,
+        component: m.compId,
+        action: m.action,
+        performed_at: m.performed_at
+          ? new Date(m.performed_at).toISOString()
+          : new Date().toISOString(),
+        notes: m.notes || '',
+      })
+      setMaintenanceModal(null)
+      load()
+    } catch (err) {
+      alert('Gagal menyimpan: ' + (err?.response?.data?.detail || JSON.stringify(err?.response?.data) || err.message))
+      setMaintenanceModal((prev) => ({ ...prev, saving: false }))
+    }
+  }
+
+  const handleReplace = async () => {
+    const m = replaceModal
+    if (!m.catatan_penggantian?.trim()) return
+    setReplaceModal((prev) => ({ ...prev, saving: true }))
+    try {
+      const res = await client.post(`/assets/${id}/replace/`, {
+        tahun_instalasi: parseInt(m.tahun_instalasi, 10),
+        catatan_penggantian: m.catatan_penggantian,
+      })
+      setReplaceModal(null)
+      navigate(`/assets/${res.data.asset_id}`, { replace: true })
+    } catch (err) {
+      alert('Gagal mengganti aset: ' + (err?.response?.data?.detail || JSON.stringify(err?.response?.data) || err.message))
+      setReplaceModal((prev) => ({ ...prev, saving: false }))
+    }
+  }
+
   if (loading) return <div className="text-center py-12 text-gray-400">Memuat detail aset...</div>
   if (!asset) return <div className="text-center py-12 text-gray-400">Aset tidak ditemukan</div>
 
@@ -160,11 +235,7 @@ export default function AssetDetail() {
   ].sort((a, b) => new Date(b._ts) - new Date(a._ts)).slice(0, 30)
   const color = getHealthStatus(asset.skor_kesehatan_aset)
 
-  const ahiPieData = [
-    { name: 'Stres Kumulatif (50%)', value: 0.5, color: '#3B82F6' },
-    { name: 'Kondisi Fisik (30%)', value: 0.3, color: '#22C55E' },
-    { name: 'Umur Kalender (20%)', value: 0.2, color: '#F59E0B' },
-  ]
+  const ahi = asset.ahi_breakdown ?? null
 
   return (
     <div className="space-y-6">
@@ -185,6 +256,15 @@ export default function AssetDetail() {
               <>
                 <button className="btn-secondary text-sm" onClick={() => setShowEdit(true)}>
                   Edit
+                </button>
+                <button
+                  className="text-sm bg-purple-50 hover:bg-purple-100 text-purple-700 px-3 py-2 rounded-lg font-medium"
+                  onClick={() => setReplaceModal({
+                    tahun_instalasi: new Date().getFullYear(),
+                    catatan_penggantian: '',
+                  })}
+                >
+                  Ganti Aset
                 </button>
                 <button
                   className="text-sm bg-red-50 hover:bg-red-100 text-red-700 px-3 py-2 rounded-lg font-medium disabled:opacity-50"
@@ -263,26 +343,95 @@ export default function AssetDetail() {
           </div>
         </div>
 
-        {/* AHI breakdown */}
-        <div className="card">
-          <h2 className="text-lg font-bold text-gray-800 mb-4">Komponen AHI</h2>
-          <ResponsiveContainer width="100%" height={180}>
-            <PieChart>
-              <Pie data={ahiPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70}>
-                {ahiPieData.map((entry, i) => (
-                  <Cell key={i} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip formatter={(val) => `${Math.round(val * 100)}%`} />
-              <Legend iconSize={10} iconType="circle" />
-            </PieChart>
-          </ResponsiveContainer>
+        {/* AHI breakdown — per component */}
+        <div className="card space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-lg font-bold text-gray-800">Kondisi Komponen LPS</h2>
+            {ahi?.worst_component && (
+              <span className={`text-xs font-semibold px-2 py-1 rounded-full shrink-0 ${BAND_INFO[ahiBand(ahi.per_component[ahi.worst_component]?.ahi ?? 1)].badge}`}>
+                ↓ {COMPONENT_LABELS[ahi.worst_component]}
+              </span>
+            )}
+          </div>
+
+          {ahi && (
+            <div className="flex items-center gap-3 text-sm">
+              <span className="text-gray-500 whitespace-nowrap text-xs">Keseluruhan</span>
+              <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className={`h-1.5 rounded-full ${BAND_INFO[ahiBand(ahi.ahi_overall)].bar}`}
+                  style={{ width: `${Math.round(ahi.ahi_overall * 100)}%` }}
+                />
+              </div>
+              <span className="font-bold text-sm w-9 text-right">{Math.round(ahi.ahi_overall * 100)}%</span>
+            </div>
+          )}
+
+          {ahi ? (
+            <div className="space-y-3 pt-1">
+              {['AT', 'DC', 'GR'].map((ct) => {
+                const comp   = ahi.per_component?.[ct]
+                const rec    = asset.recommendations?.per_component?.find((r) => r.component_type === ct)
+                if (!comp) return null
+                const band   = ahiBand(comp.ahi)
+                const info   = BAND_INFO[band]
+                const compId = componentMap[ct]
+                const nowLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+                return (
+                  <div key={ct} className="rounded-xl border border-gray-100 p-3 space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm text-gray-800">{COMPONENT_LABELS[ct]}</span>
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${info.badge}`}>{info.label}</span>
+                      <span className="ml-auto text-sm font-bold text-gray-700">{Math.round(comp.ahi * 100)}%</span>
+                    </div>
+                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-1.5 rounded-full ${info.bar}`}
+                        style={{ width: `${Math.round(comp.ahi * 100)}%` }}
+                      />
+                    </div>
+                    <div className="flex gap-3 text-xs text-gray-400">
+                      <span>Stres {Math.round((comp.sub_scores?.stress ?? 1) * 100)}%</span>
+                      <span>Fisik {Math.round((comp.sub_scores?.physical ?? 1) * 100)}%</span>
+                      <span>Umur {Math.round((comp.sub_scores?.age ?? 1) * 100)}%</span>
+                      {comp.corrosion_applied && <span className="text-red-500 font-medium">⚠ Korosi</span>}
+                    </div>
+                    {rec && (
+                      <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-gray-50">
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${info.badge}`}>
+                          {ACTION_LABELS[rec.action]}
+                        </span>
+                        <span className="text-xs text-gray-500">{HORIZON_LABELS[rec.time_horizon]}</span>
+                        <span className="text-xs text-gray-400">· {DRIVER_LABELS[rec.primary_driver]}</span>
+                        {compId && !asset.deleted_at && (
+                          <button
+                            className="ml-auto text-xs text-brand-700 hover:underline font-medium"
+                            onClick={() => setMaintenanceModal({
+                              ct,
+                              compId,
+                              action: rec.action === 'monitor' || rec.action === 'inspect' ? 'repair' : rec.action,
+                              performed_at: nowLocal,
+                              notes: '',
+                            })}
+                          >
+                            + Aksi Pemeliharaan
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-400">Data AHI belum tersedia</p>
+          )}
         </div>
 
         {/* Strike chart */}
         <div className="card">
           <h2 className="text-lg font-bold text-gray-800 mb-4">Riwayat Sambaran</h2>
-          <StrikeChart events={events} />
+          <StrikeChart events={events} kapasitasKa={asset.kapasitas_desain_ka} />
         </div>
 
         {/* Health trend */}
@@ -396,6 +545,186 @@ export default function AssetDetail() {
           </div>
         )}
       </div>
+
+      {/* Component history */}
+      <div className="card space-y-4">
+        <h2 className="text-lg font-bold text-gray-800">Riwayat Komponen LPS</h2>
+        {['AT', 'DC', 'GR'].map((ct) => {
+          const comps      = allComponents.filter((c) => c.component_type === ct)
+          const actions    = maintenanceHistory.filter((a) => a.component_type === ct)
+          const ctLabel    = COMPONENT_LABELS[ct]
+          const activeComp = comps.find((c) => !c.end_date)
+          if (comps.length === 0 && actions.length === 0) return null
+          return (
+            <div key={ct} className="rounded-xl border border-gray-100 p-3 space-y-3">
+              <p className="font-semibold text-sm text-gray-800 flex items-center gap-2">
+                {ctLabel}
+                {activeComp?.age_label && (
+                  <span className="text-xs font-normal text-gray-400">{activeComp.age_label}</span>
+                )}
+              </p>
+
+              {/* Component install chain */}
+              {comps.length > 0 && (
+                <div className="space-y-1">
+                  {comps
+                    .slice()
+                    .sort((a, b) => new Date(b.install_date) - new Date(a.install_date))
+                    .map((c) => (
+                      <div key={c.component_id} className="flex items-center gap-2 text-xs text-gray-600">
+                        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${c.end_date ? 'bg-gray-300' : 'bg-green-500'}`} />
+                        <span>
+                          Dipasang {c.install_date}
+                          {c.age_label && <span className="text-gray-400"> · {c.age_label}</span>}
+                          {c.end_date && <span className="text-gray-400"> → diganti {c.end_date}</span>}
+                        </span>
+                        {!c.end_date && (
+                          <span className="ml-1 bg-green-50 text-green-700 px-1.5 py-0.5 rounded-full text-[10px] font-medium">Aktif</span>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              )}
+
+              {/* Maintenance actions */}
+              {actions.length > 0 ? (
+                <div className="space-y-1 border-t border-gray-50 pt-2">
+                  {actions
+                    .slice()
+                    .sort((a, b) => new Date(b.performed_at) - new Date(a.performed_at))
+                    .map((a) => (
+                      <div key={a.action_id} className="flex items-start gap-2 text-xs">
+                        <span className={`mt-0.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                          a.action === 'replace' ? 'bg-purple-500' : a.action === 'repair' ? 'bg-orange-400' : 'bg-blue-400'
+                        }`} />
+                        <div className="flex-1 min-w-0">
+                          <span className="font-medium text-gray-700">{ACTION_LABELS[a.action]}</span>
+                          {a.performed_by_nama && <span className="text-gray-400"> · {a.performed_by_nama}</span>}
+                          {a.notes && <p className="text-gray-400 truncate">{a.notes}</p>}
+                        </div>
+                        <span className="text-gray-300 shrink-0">{formatDateTime(a.performed_at)}</span>
+                      </div>
+                    ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 border-t border-gray-50 pt-2">Belum ada aksi pemeliharaan</p>
+              )}
+            </div>
+          )
+        })}
+        {allComponents.length === 0 && maintenanceHistory.length === 0 && (
+          <p className="text-sm text-gray-400">Belum ada data komponen</p>
+        )}
+      </div>
+
+      {replaceModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm space-y-4">
+            <div>
+              <h3 className="font-bold text-gray-900">Ganti Aset Lengkap</h3>
+              <p className="text-xs text-gray-500 mt-1">
+                Aset <strong>{asset.nama_gedung}</strong> akan diarsipkan dan digantikan aset baru dengan komponen AT, DC, GR segar.
+                Data sambaran &amp; inspeksi lama tetap melekat pada aset yang diarsipkan.
+              </p>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Tahun instalasi aset baru</label>
+                <input
+                  type="number"
+                  className="input w-full"
+                  min="1990"
+                  max="2100"
+                  value={replaceModal.tahun_instalasi}
+                  onChange={(e) => setReplaceModal((m) => ({ ...m, tahun_instalasi: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">
+                  Alasan penggantian <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  className="input w-full resize-none"
+                  rows={3}
+                  placeholder="cth. aset lama dibongkar total karena renovasi gedung"
+                  value={replaceModal.catatan_penggantian}
+                  onChange={(e) => setReplaceModal((m) => ({ ...m, catatan_penggantian: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button className="btn-secondary flex-1" onClick={() => setReplaceModal(null)}>
+                Batal
+              </button>
+              <button
+                className="flex-1 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-50"
+                disabled={replaceModal.saving || !replaceModal.catatan_penggantian?.trim()}
+                onClick={handleReplace}
+              >
+                {replaceModal.saving ? 'Memproses...' : 'Ganti Aset'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {maintenanceModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm space-y-4">
+            <h3 className="font-bold text-gray-900">Catat Aksi Pemeliharaan</h3>
+            <p className="text-sm text-gray-600">
+              Komponen: <span className="font-semibold">{COMPONENT_LABELS[maintenanceModal.ct]}</span>
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Jenis Aksi</label>
+                <select
+                  className="input w-full"
+                  value={maintenanceModal.action}
+                  onChange={(e) => setMaintenanceModal((m) => ({ ...m, action: e.target.value }))}
+                >
+                  {MAINT_ACTIONS.map((a) => (
+                    <option key={a} value={a}>{ACTION_LABELS[a] ?? a}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Tanggal &amp; Waktu</label>
+                <input
+                  type="datetime-local"
+                  className="input w-full"
+                  value={maintenanceModal.performed_at}
+                  onChange={(e) => setMaintenanceModal((m) => ({ ...m, performed_at: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">
+                  Catatan{maintenanceModal.action === 'replace' ? <span className="text-red-500 ml-0.5">*</span> : ''}
+                </label>
+                <textarea
+                  className="input w-full resize-none"
+                  rows={3}
+                  placeholder={maintenanceModal.action === 'replace' ? 'cth. ganti karena korosi parah pada terminal udara' : 'cth. kencangkan sambungan klem bawah'}
+                  value={maintenanceModal.notes}
+                  onChange={(e) => setMaintenanceModal((m) => ({ ...m, notes: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button className="btn-secondary flex-1" onClick={() => setMaintenanceModal(null)}>
+                Batal
+              </button>
+              <button
+                className="btn-primary flex-1 disabled:opacity-50"
+                disabled={maintenanceModal.saving || (maintenanceModal.action === 'replace' && !maintenanceModal.notes?.trim())}
+                onClick={handleCreateMaintenance}
+              >
+                {maintenanceModal.saving ? 'Menyimpan...' : 'Simpan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
