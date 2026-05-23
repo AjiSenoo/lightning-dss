@@ -104,3 +104,26 @@ def run_inference(r_stress_value, d_asset_value):
         'r_stress_input': r_stress_clamped,
         'd_asset_input': d_asset_clamped,
     }
+
+
+def run_inference_per_component(r_stress_value: float, component_ahis: dict) -> dict:
+    """
+    Run fuzzy inference once per component plus an asset-level safety inference.
+
+    component_ahis: {component_type: ahi_float}  e.g. {'AT': 0.90, 'DC': 0.85, 'GR': 0.55}
+
+    Returns:
+        asset   — inference on D_asset_safety = 1 − min(component_ahis); safety-critical
+        per_component — {component_type: run_inference result}
+    """
+    per_component = {
+        ct: run_inference(r_stress_value, 1.0 - ahi)
+        for ct, ahi in component_ahis.items()
+    }
+    safety_d_asset = 1.0 - min(component_ahis.values())
+    asset_level = run_inference(r_stress_value, safety_d_asset)
+
+    return {
+        'asset': asset_level,
+        'per_component': per_component,
+    }

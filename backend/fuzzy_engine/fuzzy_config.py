@@ -63,7 +63,7 @@ REFERENCE_DAMAGE_THRESHOLD = 10.0
 DESIGN_LIFESPAN_YEARS = 25
 
 # ---------------------------------------------------------------
-# LPL Design Capacity Map (kA)
+# LPL Design Capacity Map (kA)  [legacy — kept for backward compat]
 # ---------------------------------------------------------------
 
 LPL_CAPACITY = {
@@ -72,6 +72,66 @@ LPL_CAPACITY = {
     'III': 100,
     'IV': 100,
 }
+
+# ---------------------------------------------------------------
+# Per-Component LPL Design Capacities
+# Source: IEC 62305-1:2010 Table 3 — first positive impulse (10/350 µs)
+# All three external LPS components share the same peak-current class
+# (IEC 62305-1 §8.2); what differs is the governing parameter per component.
+# ---------------------------------------------------------------
+
+LPL_DESIGN_CAPACITY = {
+    # I_kA   : peak current (kA)         — governs AT and GR
+    # Q_long_C: long-stroke charge (C)    — governs AT arc-root melting
+    # W_R_MJohm: specific energy (MJ/Ω)  — governs DC ohmic heating (W/R ∝ I²)
+    'I':   {'I_kA': 200, 'Q_long_C': 200, 'W_R_MJohm': 10.0},
+    'II':  {'I_kA': 150, 'Q_long_C': 150, 'W_R_MJohm':  5.6},
+    'III': {'I_kA': 100, 'Q_long_C': 100, 'W_R_MJohm':  2.5},
+    'IV':  {'I_kA': 100, 'Q_long_C': 100, 'W_R_MJohm':  2.5},
+}
+
+# Damage exponent per component type (IEC 62305-1 Annex D):
+#   AT : d ∝ I   (proxy for Q_long; linear)
+#   DC : d ∝ I²  (W/R ∝ I²; quadratic — same current causes disproportionate DC wear)
+#   GR : d ∝ I   (soil ionisation onset; linear)
+DAMAGE_EXPONENT = {
+    'AT': 1.0,
+    'DC': 2.0,
+    'GR': 1.0,
+}
+
+# Aggregation weights for "Overall Health" (AHI_overall) trending number.
+# GR carries the largest weight: most-frequent failure mode in Indonesian tropical soils
+# and governs step/touch-voltage safety (IEC 62305-2 loss type R1).
+# Source: engineering estimate anchored on SNI 03-7015-2004 inspection priorities
+# and CIGRE TB 858 "choose to suit the application" guidance.
+COMPONENT_WEIGHTS = {
+    'AT': float(os.getenv('W_COMPONENT_AT', '0.30')),
+    'DC': float(os.getenv('W_COMPONENT_DC', '0.30')),
+    'GR': float(os.getenv('W_COMPONENT_GR', '0.40')),
+}
+
+# Design lifespan per component type (years since install/last replacement).
+# GR: 40 yr for copper-clad-steel with 10–13 mils Cu cladding
+#     (National Bureau of Standards 45-yr study, cited in Rempe 2003).
+# AT: 25 yr (comparable to asset-level lifespan assumption).
+# DC: 30 yr (bare Cu/Al conductors are robust; failures are mainly mechanical).
+DESIGN_LIFESPAN_BY_COMPONENT = {
+    'AT': int(os.getenv('LIFESPAN_AT', '25')),
+    'DC': int(os.getenv('LIFESPAN_DC', '30')),
+    'GR': int(os.getenv('LIFESPAN_GR', '40')),
+}
+
+# Hard-fail status values that trigger immediate-replace regardless of fuzzy urgency.
+# GR uses a resistance measurement threshold instead (see GR_RESISTANCE_REPLACE_THRESHOLD_OHM).
+HARD_FAIL_STATUSES = {
+    'AT': {'Meleleh', 'Rusak'},
+    'DC': {'Putus'},
+    'GR': set(),
+}
+
+# SNI 03-7015-2004 §6.5.7: grounding resistance threshold above which replacement is required.
+GR_RESISTANCE_REPLACE_THRESHOLD_OHM = float(os.getenv('GR_RESISTANCE_THRESHOLD', '10.0'))
 
 # ---------------------------------------------------------------
 # Tropical Soil Corrosion Penalty
