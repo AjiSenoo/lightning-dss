@@ -1,7 +1,11 @@
 from datetime import timedelta
 from django.conf import settings
 from rest_framework import serializers
-from .models import AssetRegistry, AssetAudit, LightningEvent, InspectionLog, InspectionPhoto, InspectionLogAudit, Notification, User, Organization
+from .models import (
+    AssetRegistry, AssetAudit, LightningEvent, InspectionLog, InspectionPhoto,
+    InspectionLogAudit, Notification, User, Organization,
+    AssetComponent, InspectionComponentStatus, ComponentMaintenanceAction,
+)
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
@@ -40,6 +44,59 @@ class UserSerializer(serializers.ModelSerializer):
         return instance
 
 
+class AssetComponentSerializer(serializers.ModelSerializer):
+    component_type_display = serializers.CharField(source='get_component_type_display', read_only=True)
+    age_label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AssetComponent
+        fields = [
+            'component_id', 'asset', 'component_type', 'component_type_display',
+            'install_date', 'end_date', 'replaced_by',
+            'design_capacity_ka', 'catatan', 'created_at', 'updated_at',
+            'deleted_at', 'age_label',
+        ]
+        read_only_fields = ['component_id', 'component_type_display', 'created_at', 'updated_at', 'age_label']
+
+    def get_age_label(self, obj):
+        import datetime
+        today = datetime.date.today()
+        reference = obj.end_date if obj.end_date else today
+        install = obj.install_date
+        if not install:
+            return None
+        delta_days = (reference - install).days
+        if delta_days < 30:
+            return 'baru terpasang'
+        months = delta_days // 30
+        if months < 12:
+            return f'{months} bulan'
+        years = delta_days // 365
+        return f'{years} tahun'
+
+
+class InspectionComponentStatusSerializer(serializers.ModelSerializer):
+    component_type = serializers.CharField(source='component.component_type', read_only=True)
+
+    class Meta:
+        model = InspectionComponentStatus
+        fields = ['id', 'inspection', 'component', 'component_type', 'status', 'measurement', 'catatan', 'created_at']
+        read_only_fields = ['id', 'component_type', 'created_at']
+
+
+class ComponentMaintenanceActionSerializer(serializers.ModelSerializer):
+    performed_by_nama = serializers.CharField(source='performed_by.nama_lengkap', read_only=True)
+    component_type    = serializers.CharField(source='component.component_type', read_only=True)
+
+    class Meta:
+        model = ComponentMaintenanceAction
+        fields = [
+            'action_id', 'asset', 'component', 'component_type', 'action',
+            'performed_at', 'performed_by', 'performed_by_nama', 'notes', 'created_at',
+        ]
+        read_only_fields = ['action_id', 'performed_by', 'performed_by_nama', 'component_type', 'created_at']
+
+
 class AssetRegistrySerializer(serializers.ModelSerializer):
     kapasitas_desain_ka     = serializers.IntegerField(read_only=True)
     organization_nama       = serializers.CharField(source='organization.nama', read_only=True)
@@ -48,6 +105,8 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
     d_asset                 = serializers.SerializerMethodField()
     latest_event            = serializers.SerializerMethodField()
     latest_inspection_date  = serializers.SerializerMethodField()
+    ahi_breakdown           = serializers.SerializerMethodField()
+    recommendations         = serializers.SerializerMethodField()
 
     class Meta:
         model = AssetRegistry
@@ -58,6 +117,7 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
             'created_at', 'updated_at',
             'deleted_at', 'deleted_by', 'deleted_by_nama', 'deleted_by_username',
             'd_asset', 'latest_event', 'latest_inspection_date',
+            'ahi_breakdown', 'recommendations',
         ]
         read_only_fields = [
             'asset_id', 'kapasitas_desain_ka', 'organization_nama',
@@ -82,6 +142,46 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
     def get_latest_inspection_date(self, obj):
         insp = obj.inspections.first()
         return insp.tgl_inspeksi if insp else None
+
+    def get_ahi_breakdown(self, obj):
+        try:
+            from fuzzy_engine import calculate_asset_health
+            return calculate_asset_health(obj)
+        except Exception:
+            return None
+
+    def get_recommendations(self, obj):
+        # Only run the full recommendation engine on detail views to avoid N+1 on list
+        view = self.context.get('view')
+        if view and getattr(view, 'action', None) != 'retrieve':
+            return None
+        try:
+            from fuzzy_engine import calculate_asset_health, run_inference_per_component, recommend_for_asset
+            health = calculate_asset_health(obj)
+            per_ahi = {ct: r for ct, r in health['per_component'].items()}
+            ahi_by_type = {ct: r['ahi'] for ct, r in per_ahi.items()}
+            latest_event = obj.events.first()
+            r_stress = latest_event.rasio_stres if latest_event else 0.0
+            fuzzy = run_inference_per_component(r_stress, ahi_by_type)
+            # Build latest GR resistance measurement
+            latest_gr_status = None
+            gr_component = obj.components.filter(
+                component_type='GR', end_date__isnull=True, deleted_at__isnull=True
+            ).first()
+            if gr_component:
+                latest_gr_status = (
+                    gr_component.status_history
+                    .order_by('-inspection__tgl_inspeksi')
+                    .values_list('measurement', flat=True)
+                    .first()
+                )
+            return recommend_for_asset(
+                per_ahi,
+                fuzzy['per_component'],
+                latest_measurements={'GR': latest_gr_status},
+            )
+        except Exception:
+            return None
 
 
 class LightningEventSerializer(serializers.ModelSerializer):
@@ -250,23 +350,44 @@ class DashboardSummarySerializer(serializers.Serializer):
 
 class AssetMapSerializer(serializers.ModelSerializer):
     health_status = serializers.SerializerMethodField()
-    last_strike = serializers.SerializerMethodField()
+    health_band   = serializers.SerializerMethodField()
+    ahi_safety    = serializers.SerializerMethodField()
+    last_strike   = serializers.SerializerMethodField()
     last_inspection = serializers.SerializerMethodField()
 
     class Meta:
         model = AssetRegistry
         fields = [
             'asset_id', 'nama_gedung', 'lokasi_gps', 'lpl_grade',
-            'skor_kesehatan_aset', 'health_status', 'last_strike', 'last_inspection',
+            'skor_kesehatan_aset', 'health_status', 'health_band', 'ahi_safety',
+            'last_strike', 'last_inspection',
         ]
 
+    def _get_ahi_safety(self, obj):
+        try:
+            from fuzzy_engine import calculate_asset_health
+            return calculate_asset_health(obj)['ahi_safety']
+        except Exception:
+            return obj.skor_kesehatan_aset
+
+    def get_ahi_safety(self, obj):
+        return round(self._get_ahi_safety(obj), 4)
+
+    def get_health_band(self, obj):
+        # Per research §Q2(d): Green ≥ 0.85 / Orange 0.70–0.85 / Red 0.50–0.70 / Violet < 0.50
+        s = self._get_ahi_safety(obj)
+        if s >= 0.85:
+            return 'hijau'
+        elif s >= 0.70:
+            return 'oranye'
+        elif s >= 0.50:
+            return 'merah'
+        return 'ungu'
+
     def get_health_status(self, obj):
-        s = obj.skor_kesehatan_aset
-        if s > 0.7:
-            return 'aman'
-        elif s >= 0.4:
-            return 'waspada'
-        return 'bahaya'
+        # Legacy field — maps new bands to old aman/waspada/bahaya labels for backward compat
+        band = self.get_health_band(obj)
+        return 'aman' if band == 'hijau' else ('waspada' if band in ('oranye', 'merah') else 'bahaya')
 
     def get_last_strike(self, obj):
         event = obj.events.first()

@@ -1,7 +1,12 @@
+import os
+import random
 from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from core.models import Organization, AssetRegistry, AssetAudit, LightningEvent, Notification, User, InspectionLog, InspectionLogAudit
+from core.models import (
+    Organization, AssetRegistry, AssetAudit, LightningEvent, Notification,
+    User, InspectionLog, InspectionLogAudit, ComponentMaintenanceAction,
+)
 
 
 ORG_A = {
@@ -66,10 +71,20 @@ ASSETS_ORG_B = [
 ]
 
 
+_AT_STATUSES   = [('OK', 0.80), ('Rusak', 0.10), ('Meleleh', 0.05), ('Terkorosi', 0.05)]
+_DC_STATUSES   = [('OK', 0.82), ('Klem_Lepas', 0.10), ('Bengkok', 0.05), ('Putus', 0.03)]
+_GR_STATUSES   = [('OK', 0.75), ('High_Resistance', 0.15), ('Terkorosi', 0.10)]
+_MAINT_ACTIONS = [('repair', 0.55), ('install', 0.30), ('replace', 0.15)]
+
+
 class Command(BaseCommand):
     help = 'Seed the database with two demo organizations, assets, and users'
 
     def handle(self, *args, **options):
+        if os.environ.get('SEED_DEMO', '1') != '1':
+            self.stdout.write('SEED_DEMO=0 — skipping demo seed.')
+            return
+
         self.stdout.write('Seeding demo data...')
 
         # Organizations
@@ -189,11 +204,22 @@ class Command(BaseCommand):
         else:
             self._seed_notifications(teknisi, manager)
 
+        # ── Formula-driven bulk demo data ────────────────────────────────────
+        all_assets = list(AssetRegistry.objects.filter(deleted_at__isnull=True))
+
+        def teknisi_for(asset):
+            return teknisi if asset.organization_id == org_a.pk else teknisi2
+
+        self._seed_events_auto(all_assets, creator=manager)
+        self._seed_inspections_auto(all_assets, teknisi_for_asset=teknisi_for)
+        self._seed_maintenance_auto(all_assets, teknisi_for_asset=teknisi_for)
+
         self.stdout.write(self.style.SUCCESS(
             f'\nDone! {Organization.objects.count()} orgs, '
             f'{AssetRegistry.objects.count()} assets, '
             f'{User.objects.count()} users, '
-            f'{InspectionLog.objects.count()} inspection logs.'
+            f'{InspectionLog.objects.count()} inspection logs, '
+            f'{LightningEvent.objects.count()} events.'
         ))
         self.stdout.write('\nDemo credentials:')
         self.stdout.write(f'  Org A ({org_a.nama}): manager/manager123, teknisi/teknisi123')
@@ -436,3 +462,127 @@ class Command(BaseCommand):
             Notification.objects.filter(pk=n7.pk).update(created_at=now - timedelta(days=4))
 
         self.stdout.write('  Created demo verify + request_revision notifications for teknisi (1 unread)')
+
+    # ── Helpers ─────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _weighted(rng, choices):
+        vals = [v for v, _ in choices]
+        weights = [w for _, w in choices]
+        return rng.choices(vals, weights=weights, k=1)[0]
+
+    def _seed_events_auto(self, assets, creator):
+        """Create 8-15 formula-scored lightning events per asset over last 90 days."""
+        from fuzzy_engine import calculate_asset_health, run_inference_per_component
+
+        if LightningEvent.objects.filter(catatan__startswith='[DEMO-AUTO]').exists():
+            self.stdout.write('  Auto events already seeded, skipping.')
+            return
+
+        rng = random.Random(42)
+        now = timezone.now()
+        total = 0
+
+        for asset in assets:
+            count = rng.randint(8, 15)
+            for _ in range(count):
+                ts = now - timedelta(days=rng.uniform(1, 90))
+                i_peak = round(rng.choices(
+                    [rng.uniform(8, 30), rng.uniform(30, 70), rng.uniform(70, 120)],
+                    weights=[0.5, 0.35, 0.15], k=1
+                )[0], 1)
+                event = LightningEvent.objects.create(
+                    asset=asset, timestamp=ts,
+                    estimasi_arus_puncak_ka=i_peak,
+                    created_by=creator,
+                    catatan=f'[DEMO-AUTO] Sambaran simulasi {i_peak} kA',
+                )
+                try:
+                    health = calculate_asset_health(asset)
+                    ahi_by_type = {ct: r['ahi'] for ct, r in health['per_component'].items()}
+                    fuzzy = run_inference_per_component(event.rasio_stres, ahi_by_type)
+                    asset_result = fuzzy['asset']
+                    event.fuzzy_output_score = asset_result['score']
+                    event.fuzzy_output_label = asset_result['label']
+                    event.save(update_fields=['fuzzy_output_score', 'fuzzy_output_label'])
+                except Exception as exc:
+                    self.stdout.write(f'  Warning: fuzzy inference skipped for event: {exc}')
+                total += 1
+
+        self.stdout.write(f'  Created {total} auto events across {len(assets)} assets.')
+
+    def _seed_inspections_auto(self, assets, teknisi_for_asset):
+        """Create 5-8 inspections per asset with formula-driven health_after values."""
+        from fuzzy_engine import update_asset_health
+
+        if InspectionLog.objects.filter(catatan_teknisi__startswith='[DEMO-AUTO]').exists():
+            self.stdout.write('  Auto inspections already seeded, skipping.')
+            return
+
+        rng = random.Random(43)
+        now = timezone.now()
+        total = 0
+
+        for asset in assets:
+            teknisi = teknisi_for_asset(asset)
+            count = rng.randint(5, 8)
+            timestamps = sorted(
+                [now - timedelta(days=rng.uniform(2, 88)) for _ in range(count)]
+            )
+            for ts in timestamps:
+                at_status = self._weighted(rng, _AT_STATUSES)
+                dc_status = self._weighted(rng, _DC_STATUSES)
+                gr_status = self._weighted(rng, _GR_STATUSES)
+                res_ohm = round(rng.uniform(2.5, 12) + (10 if gr_status == 'High_Resistance' else 0), 1)
+
+                log = InspectionLog.objects.create(
+                    asset=asset, user=teknisi,
+                    tgl_inspeksi=ts,
+                    status_air_terminal=at_status,
+                    status_down_conductor=dc_status,
+                    status_grounding=gr_status,
+                    resistansi_grounding_ohm=res_ohm,
+                    catatan_teknisi=f'[DEMO-AUTO] Inspeksi otomatis {ts.date()}',
+                    updated_by=teknisi,
+                )
+                InspectionLog.objects.filter(pk=log.pk).update(created_at=ts)
+
+                linked = asset.events.filter(timestamp__lte=ts).order_by('-timestamp').first()
+                try:
+                    feedback = update_asset_health(asset, log, linked_event=linked)
+                    InspectionLog.objects.filter(pk=log.pk).update(
+                        health_after=feedback['health_after']
+                    )
+                except Exception as exc:
+                    self.stdout.write(f'  Warning: health update skipped: {exc}')
+                total += 1
+
+        self.stdout.write(f'  Created {total} auto inspections across {len(assets)} assets.')
+
+    def _seed_maintenance_auto(self, assets, teknisi_for_asset):
+        """Create 2-4 maintenance action records per component per asset."""
+        if ComponentMaintenanceAction.objects.filter(notes__startswith='[DEMO-AUTO]').exists():
+            self.stdout.write('  Auto maintenance already seeded, skipping.')
+            return
+
+        rng = random.Random(44)
+        now = timezone.now()
+        total = 0
+
+        for asset in assets:
+            teknisi = teknisi_for_asset(asset)
+            active_comps = list(
+                asset.components.filter(end_date__isnull=True, deleted_at__isnull=True)
+            )
+            for comp in active_comps:
+                for _ in range(rng.randint(2, 4)):
+                    ts = now - timedelta(days=rng.uniform(5, 180))
+                    action = self._weighted(rng, _MAINT_ACTIONS)
+                    ComponentMaintenanceAction.objects.create(
+                        asset=asset, component=comp,
+                        action=action, performed_at=ts, performed_by=teknisi,
+                        notes=f'[DEMO-AUTO] {action.capitalize()} komponen {comp.component_type} pada {ts.date()}',
+                    )
+                    total += 1
+
+        self.stdout.write(f'  Created {total} auto maintenance actions.')

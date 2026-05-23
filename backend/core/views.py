@@ -10,7 +10,12 @@ from rest_framework.views import APIView
 
 from django.conf import settings
 from django.shortcuts import get_object_or_404
-from .models import AssetRegistry, AssetAudit, LightningEvent, InspectionLog, InspectionLogAudit, InspectionPhoto, Notification, User, Organization
+import datetime
+from .models import (
+    AssetRegistry, AssetAudit, LightningEvent, InspectionLog, InspectionLogAudit,
+    InspectionPhoto, Notification, User, Organization,
+    AssetComponent, ComponentMaintenanceAction,
+)
 from .permissions import (
     IsManagerForAssets, IsManagerForUsers, IsOwnerOrManagerWithGrace,
 )
@@ -19,6 +24,7 @@ from .serializers import (
     InspectionLogSerializer, InspectionLogAuditSerializer, NotificationSerializer,
     UserSerializer, OrganizationSerializer,
     DashboardSummarySerializer, AssetMapSerializer,
+    AssetComponentSerializer, ComponentMaintenanceActionSerializer,
 )
 
 TRACKED_FIELDS = [
@@ -52,7 +58,7 @@ def _user_org(request):
     return getattr(request.user, 'organization', None)
 
 
-# ── Notification dispatchers ────────────────────────────────────────────────
+# -- Notification dispatchers ------------------------------------------------
 
 def _laporan_recipients(inspection, actor):
     """Cross-role recipients for a laporan state change, excluding the actor."""
@@ -228,6 +234,47 @@ class AssetViewSet(viewsets.ModelViewSet):
             _emit_asset_notification(instance, request.user, 'asset_restore')
         return Response(AssetRegistrySerializer(instance).data)
 
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsManagerForUsers])
+    def replace(self, request, pk=None):
+        old = self.get_object()
+        if old.deleted_at is not None:
+            return Response({'detail': 'Aset sudah di Tempat Sampah.'}, status=status.HTTP_409_CONFLICT)
+        catatan_penggantian = (request.data.get('catatan_penggantian') or '').strip()
+        if not catatan_penggantian:
+            return Response({'detail': 'Catatan penggantian wajib diisi.'}, status=status.HTTP_400_BAD_REQUEST)
+        new_data = {
+            'nama_gedung':             request.data.get('nama_gedung', old.nama_gedung),
+            'lokasi_gps':              request.data.get('lokasi_gps', old.lokasi_gps),
+            'lpl_grade':               request.data.get('lpl_grade', old.lpl_grade),
+            'tahun_instalasi':         request.data.get('tahun_instalasi', old.tahun_instalasi),
+            'jenis_material_konduktor': request.data.get('jenis_material_konduktor', old.jenis_material_konduktor),
+            'resistivitas_tanah':      request.data.get('resistivitas_tanah', old.resistivitas_tanah),
+            'catatan':                 request.data.get('catatan', old.catatan),
+        }
+        serializer = self.get_serializer(data=new_data)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            new_asset = serializer.save(organization=old.organization)
+            old.deleted_at = timezone.now()
+            old.deleted_by = request.user
+            old.save(update_fields=['deleted_at', 'deleted_by'])
+            AssetAudit.objects.create(
+                asset=old, actor=request.user, action='replaced',
+                note=catatan_penggantian,
+                diff={'new_asset_id': str(new_asset.asset_id)},
+            )
+            AssetAudit.objects.create(
+                asset=new_asset, actor=request.user, action='replaces',
+                note=catatan_penggantian,
+                diff={'old_asset_id': str(old.asset_id)},
+            )
+            _emit_asset_notification(old, request.user, 'asset_delete')
+            _emit_asset_notification(new_asset, request.user, 'asset_create')
+        return Response(
+            AssetRegistrySerializer(new_asset, context={'request': request, 'view': self}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
     @action(detail=True, methods=['get'])
     def audits(self, request, pk=None):
         asset = self.get_object()
@@ -280,21 +327,22 @@ class EventViewSet(viewsets.ModelViewSet):
         return qs.order_by('-timestamp')
 
     def perform_create(self, serializer):
-        from fuzzy_engine import run_inference, calculate_ahi
+        from fuzzy_engine import calculate_asset_health, run_inference_per_component
         user = self.request.user if self.request and self.request.user.is_authenticated else None
         with transaction.atomic():
             event = serializer.save(created_by=user)
             _emit_lightning_broadcast(event)
 
-        # Run fuzzy inference outside the transaction so a failure doesn't roll back the event
+        # Run per-component fuzzy inference outside the transaction
         try:
             asset = event.asset
+            health = calculate_asset_health(asset)
+            ahi_by_type = {ct: r['ahi'] for ct, r in health['per_component'].items()}
             r_stress = event.rasio_stres
-            ahi_result = calculate_ahi(asset)
-            d_asset = ahi_result['d_asset']
-            fuzzy_result = run_inference(r_stress, d_asset)
-            event.fuzzy_output_score = fuzzy_result['score']
-            event.fuzzy_output_label = fuzzy_result['label']
+            fuzzy = run_inference_per_component(r_stress, ahi_by_type)
+            asset_result = fuzzy['asset']
+            event.fuzzy_output_score = asset_result['score']
+            event.fuzzy_output_label = asset_result['label']
             event.save(update_fields=['fuzzy_output_score', 'fuzzy_output_label'])
         except Exception:
             pass
@@ -441,6 +489,8 @@ class InspectionViewSet(viewsets.ModelViewSet):
         except Exception:
             health_after = asset.skor_kesehatan_aset
 
+        InspectionLog.objects.filter(pk=updated.pk).update(health_after=health_after)
+
         data = InspectionLogSerializer(updated).data
         data['health_before'] = health_before
         data['health_after'] = health_after
@@ -506,6 +556,8 @@ class InspectionViewSet(viewsets.ModelViewSet):
             health_after = feedback['health_after']
         except Exception:
             health_after = health_before
+
+        InspectionLog.objects.filter(pk=inspection.pk).update(health_after=health_after)
 
         data = InspectionLogSerializer(inspection).data
         data['health_before'] = health_before
@@ -938,3 +990,94 @@ class HealthCheckView(APIView):
 
     def get(self, request):
         return Response({'status': 'ok'})
+
+
+class AssetComponentViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Read-only list/retrieve of components per asset.
+    GET /api/components/?asset=<uuid>   — active components for an asset
+    GET /api/components/<uuid>/         — single component detail
+    """
+    serializer_class = AssetComponentSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = AssetComponent.objects.filter(deleted_at__isnull=True)
+        org = _user_org(self.request)
+        if org:
+            qs = qs.filter(asset__organization=org)
+        asset_id = self.request.query_params.get('asset')
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        active_only = self.request.query_params.get('active', 'true').lower()
+        if active_only in ('true', '1', 'yes'):
+            qs = qs.filter(end_date__isnull=True)
+        return qs.select_related('asset').order_by('component_type', '-install_date')
+
+
+class ComponentMaintenanceActionViewSet(viewsets.ModelViewSet):
+    """
+    List and create maintenance actions. POST with action='replace' atomically
+    end-dates the current component and creates a new one.
+
+    GET  /api/maintenance-actions/?asset=<uuid>
+    GET  /api/maintenance-actions/?component=<uuid>
+    POST /api/maintenance-actions/
+    """
+    serializer_class = ComponentMaintenanceActionSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ['get', 'post', 'head', 'options']
+
+    def get_queryset(self):
+        qs = ComponentMaintenanceAction.objects.all()
+        org = _user_org(self.request)
+        if org:
+            qs = qs.filter(asset__organization=org)
+        asset_id = self.request.query_params.get('asset')
+        if asset_id:
+            qs = qs.filter(asset_id=asset_id)
+        component_id = self.request.query_params.get('component')
+        if component_id:
+            qs = qs.filter(component_id=component_id)
+        return qs.select_related('asset', 'component', 'performed_by').order_by('-performed_at')
+
+    def create(self, request, *_args, **_kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        action_type      = serializer.validated_data['action']
+        component        = serializer.validated_data['component']
+        performed_at     = serializer.validated_data['performed_at']
+
+        with transaction.atomic():
+            if action_type == 'replace':
+                # End-date the current component and create its successor
+                install_date = performed_at.date() if hasattr(performed_at, 'date') else performed_at
+                old_component = component
+
+                new_component = AssetComponent.objects.create(
+                    asset=old_component.asset,
+                    component_type=old_component.component_type,
+                    install_date=install_date,
+                    design_capacity_ka=old_component.design_capacity_ka,
+                )
+                old_component.end_date = install_date
+                old_component.replaced_by = new_component
+                old_component.save(update_fields=['end_date', 'replaced_by', 'updated_at'])
+
+                # Record the action against the NEW component
+                maintenance_action = ComponentMaintenanceAction.objects.create(
+                    asset=old_component.asset,
+                    component=new_component,
+                    action='replace',
+                    performed_at=performed_at,
+                    performed_by=request.user,
+                    notes=serializer.validated_data.get('notes', ''),
+                )
+            else:
+                maintenance_action = serializer.save(performed_by=request.user)
+
+        return Response(
+            ComponentMaintenanceActionSerializer(maintenance_action, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )

@@ -9,6 +9,7 @@ from .views import (
     UserViewSet, CurrentUserView,
     DashboardSummaryView, DashboardMapView,
     FuzzySimulateView, HealthCheckView,
+    AssetComponentViewSet, ComponentMaintenanceActionViewSet,
 )
 
 router = DefaultRouter()
@@ -18,6 +19,8 @@ router.register(r'events', EventViewSet, basename='event')
 router.register(r'inspections', InspectionViewSet, basename='inspection')
 router.register(r'users', UserViewSet, basename='user')
 router.register(r'notifications', NotificationViewSet, basename='notifications')
+router.register(r'components', AssetComponentViewSet, basename='component')
+router.register(r'maintenance-actions', ComponentMaintenanceActionViewSet, basename='maintenance-action')
 
 urlpatterns = [
     path('', include(router.urls)),
