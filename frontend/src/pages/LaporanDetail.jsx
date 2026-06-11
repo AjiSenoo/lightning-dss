@@ -134,8 +134,8 @@ function VerifyConfirmModal({ onConfirm, onCancel, loading }) {
         onClick={(e) => e.stopPropagation()}>
         <h3 className="text-lg font-bold text-gray-900 mb-2">Verifikasi Laporan?</h3>
         <p className="text-sm text-gray-600 mb-3">
-          Setelah diverifikasi, laporan ini <strong>tidak dapat lagi diedit langsung</strong>.
-          Jika perlu mengubah, Anda harus mencabut verifikasi terlebih dahulu.
+          Setelah diverifikasi, laporan ini <strong>menjadi final dan tidak dapat diedit lagi</strong>.
+          Bila kemudian ditemukan kesalahan, Manajer dapat membuat satu amandemen sebagai koreksi — verifikasi laporan asli tetap tercatat.
         </p>
         <p className="text-sm text-gray-500 mb-4">Pastikan Anda sudah meninjau laporan dengan teliti.</p>
         <div className="flex gap-2">
@@ -192,42 +192,6 @@ function RevisionRequestModal({ existingNote, onConfirm, onCancel, loading }) {
   )
 }
 
-function RevokeVerificationModal({ onConfirm, onCancel, loading }) {
-  const [note, setNote] = useState('')
-  return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-30 flex items-center justify-center p-4 animate-fade-in"
-      onClick={onCancel}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 animate-scale-in"
-        onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-gray-900 mb-2">Cabut Verifikasi?</h3>
-        <p className="text-sm text-gray-600 mb-3">
-          Verifikasi akan dicabut dan laporan kembali ke status <strong>Belum Terverifikasi</strong>.
-          Riwayat verifikasi sebelumnya tetap tercatat di timeline.
-        </p>
-        <textarea
-          className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none"
-          rows={3}
-          maxLength={500}
-          placeholder="Tuliskan alasan pencabutan (opsional)…"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          autoFocus
-        />
-        <p className="text-xs text-gray-400 text-right mt-1">{note.length}/500</p>
-        <div className="flex gap-2 mt-3">
-          <button className="btn-secondary flex-1" onClick={onCancel} disabled={loading}>Batal</button>
-          <button
-            className="flex-1 text-sm font-medium px-3 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white transition-colors disabled:opacity-50"
-            onClick={() => onConfirm(note)}
-            disabled={loading}
-          >
-            {loading ? 'Mencabut…' : 'Cabut Verifikasi'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 function DeleteConfirmModal({ log, onConfirm, onCancel }) {
   const purgeDate = new Date()
@@ -267,7 +231,6 @@ export default function LaporanDetail() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showVerifyModal, setShowVerifyModal] = useState(false)
   const [showRevisionModal, setShowRevisionModal] = useState(false)
-  const [showRevokeModal, setShowRevokeModal] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
 
   useEffect(() => {
@@ -293,10 +256,9 @@ export default function LaporanDetail() {
   const isVerified  = log?.verification_status === 'verified'
   const isRevisionRequested = log?.verification_status === 'revision_requested'
   const canEdit              = !isDeleted && !isVerified && ((isOwn && inGrace) || isManager)
-  const canAmend             = !isDeleted && !log?.amends && ((isOwn && !isVerified) || isManager)
+  const canAmend             = !isDeleted && !log?.amends && !(log?.amendments?.length) && ((isOwn && !isVerified) || isManager)
   const canVerify            = isManager && !isDeleted && !isVerified
   const canRequestRevision   = isManager && !isDeleted && !isVerified
-  const canRevokeVerification = isManager && !isDeleted && isVerified
 
   const handleDelete = async () => {
     setActionLoading(true)
@@ -358,21 +320,6 @@ export default function LaporanDetail() {
     }
   }
 
-  const handleRevokeVerification = async (note) => {
-    setActionLoading(true)
-    try {
-      const res = await client.post(`/inspections/${id}/revoke_verification/`, note ? { note } : {})
-      setLog(res.data)
-      setShowRevokeModal(false)
-      const auditRes = await client.get(`/inspections/${id}/audit/`)
-      setAudit(Array.isArray(auditRes.data) ? auditRes.data : auditRes.data.results || [])
-    } catch (err) {
-      setError(err?.response?.data?.detail || 'Gagal mencabut verifikasi')
-      setShowRevokeModal(false)
-    } finally {
-      setActionLoading(false)
-    }
-  }
 
   if (loading) {
     return (
@@ -466,15 +413,6 @@ export default function LaporanDetail() {
               <span className="text-xs text-gray-400 italic">
                 ℹ Laporan ini sudah terverifikasi. Hubungi Manajer jika ada perubahan.
               </span>
-            )}
-            {canRevokeVerification && (
-              <button
-                className="text-sm font-medium px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white transition-colors"
-                onClick={() => setShowRevokeModal(true)}
-                disabled={actionLoading}
-              >
-                Cabut Verifikasi
-              </button>
             )}
             {canVerify && (
               <button
@@ -660,13 +598,6 @@ export default function LaporanDetail() {
           existingNote={isRevisionRequested ? log.revision_request_note : ''}
           onConfirm={handleRequestRevision}
           onCancel={() => setShowRevisionModal(false)}
-          loading={actionLoading}
-        />
-      )}
-      {showRevokeModal && (
-        <RevokeVerificationModal
-          onConfirm={handleRevokeVerification}
-          onCancel={() => setShowRevokeModal(false)}
           loading={actionLoading}
         />
       )}

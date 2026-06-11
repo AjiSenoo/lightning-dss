@@ -6,9 +6,11 @@ import { useIsManager } from '../auth/AuthContext'
 import AssetForm from '../components/AssetForm'
 import EmptyState from '../components/EmptyState'
 import { SkeletonCard } from '../components/Skeleton'
+import AssetMap from '../components/AssetMap'
 
 export default function AssetPortfolio() {
   const [assets, setAssets] = useState([])
+  const [mapAssets, setMapAssets] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterLpl, setFilterLpl] = useState('')
@@ -19,9 +21,13 @@ export default function AssetPortfolio() {
 
   const reload = async () => {
     setLoading(true)
-    const result = await cacheStore.getAssets()
+    const [result, mapResult] = await Promise.all([
+      cacheStore.getAssets(),
+      cacheStore.getDashboardMap(),
+    ])
     setAssets(result.data || [])
-    setIsStale(result.isStale)
+    setMapAssets(mapResult.data || [])
+    setIsStale(result.isStale || mapResult.isStale)
     setLoading(false)
   }
 
@@ -68,6 +74,15 @@ export default function AssetPortfolio() {
           onSaved={() => reload()}
         />
       )}
+
+      {/* Map */}
+      <div className="card p-0 overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-100">
+          <h2 className="text-base font-semibold text-gray-800">🗺️ Peta Aset</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Klik pin untuk melihat detail aset</p>
+        </div>
+        <AssetMap assets={mapAssets} />
+      </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">

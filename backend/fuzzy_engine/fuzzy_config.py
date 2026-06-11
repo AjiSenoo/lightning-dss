@@ -111,15 +111,26 @@ COMPONENT_WEIGHTS = {
     'GR': float(os.getenv('W_COMPONENT_GR', '0.40')),
 }
 
-# Design lifespan per component type (years since install/last replacement).
-# GR: 40 yr for copper-clad-steel with 10–13 mils Cu cladding
-#     (National Bureau of Standards 45-yr study, cited in Rempe 2003).
-# AT: 25 yr (comparable to asset-level lifespan assumption).
-# DC: 30 yr (bare Cu/Al conductors are robust; failures are mainly mechanical).
+# Design lifespan per component type (years since install/last replacement),
+# selected by SITE_CLIMATE_PROFILE. Temperate baseline:
+#   GR 40 yr for copper-clad-steel with 10-13 mils Cu cladding
+#       (National Bureau of Standards 45-yr study, cited in Rempe 2003);
+#   AT 25 yr (comparable to asset-level lifespan assumption);
+#   DC 30 yr (bare Cu/Al conductors are robust; failures are mainly mechanical).
+# Tropical Indonesia profile derates ~25% (AT 20 / DC 25 / GR 33) for higher
+# flash density (Hidayat & Ishii 1998) and acidic-laterite corrosion
+# (NBS Circular 579). Default stays 'temperate' for backward compatibility;
+# per-component LIFESPAN_* env vars still override the selected profile.
+SITE_CLIMATE_PROFILE = os.getenv('SITE_CLIMATE_PROFILE', 'temperate').lower()
+_LIFESPAN_PROFILES = {
+    'temperate': {'AT': 25, 'DC': 30, 'GR': 40},
+    'tropical':  {'AT': 20, 'DC': 25, 'GR': 33},
+}
+_lifespan_base = _LIFESPAN_PROFILES.get(SITE_CLIMATE_PROFILE, _LIFESPAN_PROFILES['temperate'])
 DESIGN_LIFESPAN_BY_COMPONENT = {
-    'AT': int(os.getenv('LIFESPAN_AT', '25')),
-    'DC': int(os.getenv('LIFESPAN_DC', '30')),
-    'GR': int(os.getenv('LIFESPAN_GR', '40')),
+    'AT': int(os.getenv('LIFESPAN_AT', str(_lifespan_base['AT']))),
+    'DC': int(os.getenv('LIFESPAN_DC', str(_lifespan_base['DC']))),
+    'GR': int(os.getenv('LIFESPAN_GR', str(_lifespan_base['GR']))),
 }
 
 # Hard-fail status values that trigger immediate-replace regardless of fuzzy urgency.
@@ -130,8 +141,9 @@ HARD_FAIL_STATUSES = {
     'GR': set(),
 }
 
-# SNI 03-7015-2004 §6.5.7: grounding resistance threshold above which replacement is required.
-GR_RESISTANCE_REPLACE_THRESHOLD_OHM = float(os.getenv('GR_RESISTANCE_THRESHOLD', '10.0'))
+# SNI 03-7015-2004 §6.5.7 and PUIL 2011 require grounding resistance <= 5 ohm for
+# lightning-protection installations in Indonesia; above this, replacement is required.
+GR_RESISTANCE_REPLACE_THRESHOLD_OHM = float(os.getenv('GR_RESISTANCE_THRESHOLD', '5.0'))
 
 # ---------------------------------------------------------------
 # Tropical Soil Corrosion Penalty

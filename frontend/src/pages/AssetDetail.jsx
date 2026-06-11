@@ -124,6 +124,8 @@ export default function AssetDetail() {
   const [maintenanceHistory, setMaintenanceHistory] = useState([])
   const [maintenanceModal, setMaintenanceModal] = useState(null)
   const [replaceModal, setReplaceModal] = useState(null)
+  const [showActivityModal, setShowActivityModal] = useState(false)
+  const [showComponentsModal, setShowComponentsModal] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -232,10 +234,167 @@ export default function AssetDetail() {
       _ts: a.created_at,
       data: a,
     })),
-  ].sort((a, b) => new Date(b._ts) - new Date(a._ts)).slice(0, 30)
+  ].sort((a, b) => new Date(b._ts) - new Date(a._ts))
   const color = getHealthStatus(asset.skor_kesehatan_aset)
 
   const ahi = asset.ahi_breakdown ?? null
+
+  const hasMoreActions = ['AT', 'DC', 'GR'].some(
+    (ct) => maintenanceHistory.filter((a) => a.component_type === ct).length > 5
+  )
+
+  const renderTimelineItem = (item, i) => {
+    if (item._type === 'event') {
+      const ev = item.data
+      return (
+        <div key={`ev-${ev.event_id ?? i}`} className="flex gap-3 items-start">
+          <div className="mt-1 w-2 h-2 rounded-full flex-shrink-0 bg-amber-400" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">
+              Sambaran {ev.estimasi_arus_puncak_ka} kA
+              {ev.fuzzy_output_label && (
+                <span className="ml-2">
+                  <UrgencyBadge label={ev.fuzzy_output_label} size="sm" />
+                </span>
+              )}
+            </p>
+            <p className="text-xs text-gray-400">{formatDateTime(ev.timestamp)}</p>
+          </div>
+          <span className="text-xs text-gray-300">⚡</span>
+        </div>
+      )
+    }
+    if (item._type === 'inspection') {
+      const log = item.data
+      const { canEdit, canAmend } = inspectionEligibility(log, user?.id, isManager)
+      return (
+        <div key={`ins-${log.log_id ?? i}`} className="flex gap-3 items-start">
+          <div className="mt-1 w-2 h-2 rounded-full flex-shrink-0 bg-blue-400" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium flex items-center gap-2 flex-wrap">
+              {log.amends && <span className="text-xs text-amber-700">↳</span>}
+              <span className="flex items-center gap-1 flex-wrap">
+                <StatusChip label="AT" value={log.status_air_terminal} />
+                <StatusChip label="DC" value={log.status_down_conductor} />
+                <StatusChip label="GD" value={log.status_grounding} />
+              </span>
+              {log.amends && (
+                <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Amandemen</span>
+              )}
+              {!log.amends && log.amendments && log.amendments.length > 0 && (
+                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
+                  Diamandemen ({log.amendments.length})
+                </span>
+              )}
+              {log.photos && log.photos.length > 0 && (
+                <span className="text-xs text-gray-500">📷 {log.photos.length}</span>
+              )}
+            </p>
+            <p className="text-xs text-gray-400">
+              {formatDateTime(log.tgl_inspeksi)}
+              {log.user_nama && <> · {log.user_nama}</>}
+            </p>
+            {(canEdit || canAmend) && (
+              <div className="flex gap-3 mt-1">
+                {canEdit && (
+                  <button
+                    className="text-xs text-blue-600 hover:underline"
+                    onClick={() => navigate(`/inspections/new?edit=${log.log_id}`)}
+                  >
+                    Edit
+                  </button>
+                )}
+                {canAmend && (
+                  <button
+                    className="text-xs text-amber-700 hover:underline"
+                    onClick={() => navigate(`/inspections/new?amend=${log.log_id}`)}
+                  >
+                    Amandemen
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <span className="text-xs text-gray-300">📋</span>
+        </div>
+      )
+    }
+    const a = item.data
+    return (
+      <div key={`aud-${a.audit_id ?? i}`} className="flex gap-3 items-start">
+        <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${AUDIT_DOT[a.action] || 'bg-gray-400'}`} />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm">
+            <span className="font-medium text-gray-800">{a.actor_nama || a.actor_username || 'Sistem'}</span>{' '}
+            <span className="text-gray-600">{AUDIT_LABEL[a.action] || a.action}</span>
+            {a.note && <span className="text-gray-500"> — {a.note}</span>}
+          </p>
+          {a.diff && <CollapsibleDiff diff={a.diff} />}
+          <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(a.created_at)}</p>
+        </div>
+        <span className="text-xs text-gray-300">🔧</span>
+      </div>
+    )
+  }
+
+  const renderComponentSection = (ct, limitActions) => {
+    const comps      = allComponents.filter((c) => c.component_type === ct)
+    const actions    = maintenanceHistory.filter((a) => a.component_type === ct)
+    const ctLabel    = COMPONENT_LABELS[ct]
+    const activeComp = comps.find((c) => !c.end_date)
+    if (comps.length === 0 && actions.length === 0) return null
+    const sortedActions = actions.slice().sort((a, b) => new Date(b.performed_at) - new Date(a.performed_at))
+    const visibleActions = limitActions ? sortedActions.slice(0, limitActions) : sortedActions
+    return (
+      <div key={ct} className="rounded-xl border border-gray-100 p-3 space-y-3">
+        <p className="font-semibold text-sm text-gray-800 flex items-center gap-2">
+          {ctLabel}
+          {activeComp?.age_label && (
+            <span className="text-xs font-normal text-gray-400">{activeComp.age_label}</span>
+          )}
+        </p>
+        {comps.length > 0 && (
+          <div className="space-y-1">
+            {comps
+              .slice()
+              .sort((a, b) => new Date(b.install_date) - new Date(a.install_date))
+              .map((c) => (
+                <div key={c.component_id} className="flex items-center gap-2 text-xs text-gray-600">
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${c.end_date ? 'bg-gray-300' : 'bg-green-500'}`} />
+                  <span>
+                    Dipasang {c.install_date}
+                    {c.age_label && <span className="text-gray-400"> · {c.age_label}</span>}
+                    {c.end_date && <span className="text-gray-400"> → diganti {c.end_date}</span>}
+                  </span>
+                  {!c.end_date && (
+                    <span className="ml-1 bg-green-50 text-green-700 px-1.5 py-0.5 rounded-full text-[10px] font-medium">Aktif</span>
+                  )}
+                </div>
+              ))}
+          </div>
+        )}
+        {actions.length > 0 ? (
+          <div className="space-y-1 border-t border-gray-50 pt-2">
+            {visibleActions.map((a) => (
+              <div key={a.action_id} className="flex items-start gap-2 text-xs">
+                <span className={`mt-0.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                  a.action === 'replace' ? 'bg-purple-500' : a.action === 'repair' ? 'bg-orange-400' : 'bg-blue-400'
+                }`} />
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium text-gray-700">{ACTION_LABELS[a.action]}</span>
+                  {a.performed_by_nama && <span className="text-gray-400"> · {a.performed_by_nama}</span>}
+                  {a.notes && <p className="text-gray-400 truncate">{a.notes}</p>}
+                </div>
+                <span className="text-gray-300 shrink-0">{formatDateTime(a.performed_at)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-gray-400 border-t border-gray-50 pt-2">Belum ada aksi pemeliharaan</p>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -370,17 +529,21 @@ export default function AssetDetail() {
           {ahi ? (
             <div className="space-y-3 pt-1">
               {['AT', 'DC', 'GR'].map((ct) => {
-                const comp   = ahi.per_component?.[ct]
-                const rec    = asset.recommendations?.per_component?.find((r) => r.component_type === ct)
+                const comp       = ahi.per_component?.[ct]
+                const rec        = asset.recommendations?.per_component?.find((r) => r.component_type === ct)
                 if (!comp) return null
-                const band   = ahiBand(comp.ahi)
-                const info   = BAND_INFO[band]
-                const compId = componentMap[ct]
+                const band       = ahiBand(comp.ahi)
+                const info       = BAND_INFO[band]
+                const compId     = componentMap[ct]
+                const activeComp = allComponents.find((c) => c.component_type === ct && !c.end_date)
                 const nowLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
                 return (
                   <div key={ct} className="rounded-xl border border-gray-100 p-3 space-y-2">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-sm text-gray-800">{COMPONENT_LABELS[ct]}</span>
+                      {activeComp?.age_label && (
+                        <span className="text-xs font-normal text-gray-400">{activeComp.age_label}</span>
+                      )}
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${info.badge}`}>{info.label}</span>
                       <span className="ml-auto text-sm font-bold text-gray-700">{Math.round(comp.ahi * 100)}%</span>
                     </div>
@@ -443,179 +606,72 @@ export default function AssetDetail() {
 
       {/* Unified timeline */}
       <div className="card">
-        <h2 className="text-lg font-bold text-gray-800 mb-4">Riwayat Aktivitas</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-gray-800">Riwayat Aktivitas</h2>
+          {unifiedTimeline.length > 5 && (
+            <button
+              className="text-sm text-brand-700 hover:underline font-medium"
+              onClick={() => setShowActivityModal(true)}
+            >
+              Lihat semua ({unifiedTimeline.length})
+            </button>
+          )}
+        </div>
         {unifiedTimeline.length === 0 ? (
           <p className="text-gray-400 text-sm">Belum ada aktivitas</p>
         ) : (
           <div className="space-y-3">
-            {unifiedTimeline.map((item, i) => {
-              if (item._type === 'event') {
-                const ev = item.data
-                return (
-                  <div key={`ev-${ev.event_id ?? i}`} className="flex gap-3 items-start">
-                    <div className="mt-1 w-2 h-2 rounded-full flex-shrink-0 bg-amber-400" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">
-                        Sambaran {ev.estimasi_arus_puncak_ka} kA
-                        {ev.fuzzy_output_label && (
-                          <span className="ml-2">
-                            <UrgencyBadge label={ev.fuzzy_output_label} size="sm" />
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-xs text-gray-400">{formatDateTime(ev.timestamp)}</p>
-                    </div>
-                    <span className="text-xs text-gray-300">⚡</span>
-                  </div>
-                )
-              }
-              if (item._type === 'inspection') {
-                const log = item.data
-                const { canEdit, canAmend } = inspectionEligibility(log, user?.id, isManager)
-                return (
-                  <div key={`ins-${log.log_id ?? i}`} className="flex gap-3 items-start">
-                    <div className="mt-1 w-2 h-2 rounded-full flex-shrink-0 bg-blue-400" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium flex items-center gap-2 flex-wrap">
-                        {log.amends && <span className="text-xs text-amber-700">↳</span>}
-                        <span className="flex items-center gap-1 flex-wrap">
-                          <StatusChip label="AT" value={log.status_air_terminal} />
-                          <StatusChip label="DC" value={log.status_down_conductor} />
-                          <StatusChip label="GD" value={log.status_grounding} />
-                        </span>
-                        {log.amends && (
-                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Amandemen</span>
-                        )}
-                        {!log.amends && log.amendments && log.amendments.length > 0 && (
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                            Diamandemen ({log.amendments.length})
-                          </span>
-                        )}
-                        {log.photos && log.photos.length > 0 && (
-                          <span className="text-xs text-gray-500">📷 {log.photos.length}</span>
-                        )}
-                      </p>
-                      <p className="text-xs text-gray-400">
-                        {formatDateTime(log.tgl_inspeksi)}
-                        {log.user_nama && <> · {log.user_nama}</>}
-                      </p>
-                      {(canEdit || canAmend) && (
-                        <div className="flex gap-3 mt-1">
-                          {canEdit && (
-                            <button
-                              className="text-xs text-blue-600 hover:underline"
-                              onClick={() => navigate(`/inspections/new?edit=${log.log_id}`)}
-                            >
-                              Edit
-                            </button>
-                          )}
-                          {canAmend && (
-                            <button
-                              className="text-xs text-amber-700 hover:underline"
-                              onClick={() => navigate(`/inspections/new?amend=${log.log_id}`)}
-                            >
-                              Amandemen
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <span className="text-xs text-gray-300">📋</span>
-                  </div>
-                )
-              }
-              // audit entry
-              const a = item.data
-              return (
-                <div key={`aud-${a.audit_id ?? i}`} className="flex gap-3 items-start">
-                  <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${AUDIT_DOT[a.action] || 'bg-gray-400'}`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm">
-                      <span className="font-medium text-gray-800">{a.actor_nama || a.actor_username || 'Sistem'}</span>{' '}
-                      <span className="text-gray-600">{AUDIT_LABEL[a.action] || a.action}</span>
-                      {a.note && <span className="text-gray-500"> — {a.note}</span>}
-                    </p>
-                    {a.diff && <CollapsibleDiff diff={a.diff} />}
-                    <p className="text-xs text-gray-400 mt-0.5">{formatDateTime(a.created_at)}</p>
-                  </div>
-                  <span className="text-xs text-gray-300">🔧</span>
-                </div>
-              )
-            })}
+            {unifiedTimeline.slice(0, 5).map(renderTimelineItem)}
           </div>
         )}
       </div>
 
       {/* Component history */}
       <div className="card space-y-4">
-        <h2 className="text-lg font-bold text-gray-800">Riwayat Komponen LPS</h2>
-        {['AT', 'DC', 'GR'].map((ct) => {
-          const comps      = allComponents.filter((c) => c.component_type === ct)
-          const actions    = maintenanceHistory.filter((a) => a.component_type === ct)
-          const ctLabel    = COMPONENT_LABELS[ct]
-          const activeComp = comps.find((c) => !c.end_date)
-          if (comps.length === 0 && actions.length === 0) return null
-          return (
-            <div key={ct} className="rounded-xl border border-gray-100 p-3 space-y-3">
-              <p className="font-semibold text-sm text-gray-800 flex items-center gap-2">
-                {ctLabel}
-                {activeComp?.age_label && (
-                  <span className="text-xs font-normal text-gray-400">{activeComp.age_label}</span>
-                )}
-              </p>
-
-              {/* Component install chain */}
-              {comps.length > 0 && (
-                <div className="space-y-1">
-                  {comps
-                    .slice()
-                    .sort((a, b) => new Date(b.install_date) - new Date(a.install_date))
-                    .map((c) => (
-                      <div key={c.component_id} className="flex items-center gap-2 text-xs text-gray-600">
-                        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${c.end_date ? 'bg-gray-300' : 'bg-green-500'}`} />
-                        <span>
-                          Dipasang {c.install_date}
-                          {c.age_label && <span className="text-gray-400"> · {c.age_label}</span>}
-                          {c.end_date && <span className="text-gray-400"> → diganti {c.end_date}</span>}
-                        </span>
-                        {!c.end_date && (
-                          <span className="ml-1 bg-green-50 text-green-700 px-1.5 py-0.5 rounded-full text-[10px] font-medium">Aktif</span>
-                        )}
-                      </div>
-                    ))}
-                </div>
-              )}
-
-              {/* Maintenance actions */}
-              {actions.length > 0 ? (
-                <div className="space-y-1 border-t border-gray-50 pt-2">
-                  {actions
-                    .slice()
-                    .sort((a, b) => new Date(b.performed_at) - new Date(a.performed_at))
-                    .map((a) => (
-                      <div key={a.action_id} className="flex items-start gap-2 text-xs">
-                        <span className={`mt-0.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                          a.action === 'replace' ? 'bg-purple-500' : a.action === 'repair' ? 'bg-orange-400' : 'bg-blue-400'
-                        }`} />
-                        <div className="flex-1 min-w-0">
-                          <span className="font-medium text-gray-700">{ACTION_LABELS[a.action]}</span>
-                          {a.performed_by_nama && <span className="text-gray-400"> · {a.performed_by_nama}</span>}
-                          {a.notes && <p className="text-gray-400 truncate">{a.notes}</p>}
-                        </div>
-                        <span className="text-gray-300 shrink-0">{formatDateTime(a.performed_at)}</span>
-                      </div>
-                    ))}
-                </div>
-              ) : (
-                <p className="text-xs text-gray-400 border-t border-gray-50 pt-2">Belum ada aksi pemeliharaan</p>
-              )}
-            </div>
-          )
-        })}
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-gray-800">Riwayat Komponen LPS</h2>
+          {hasMoreActions && (
+            <button
+              className="text-sm text-brand-700 hover:underline font-medium"
+              onClick={() => setShowComponentsModal(true)}
+            >
+              Lihat semua
+            </button>
+          )}
+        </div>
+        {['AT', 'DC', 'GR'].map((ct) => renderComponentSection(ct, 5))}
         {allComponents.length === 0 && maintenanceHistory.length === 0 && (
           <p className="text-sm text-gray-400">Belum ada data komponen</p>
         )}
       </div>
+
+      {showActivityModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setShowActivityModal(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+              <h3 className="font-bold text-gray-900">Riwayat Aktivitas</h3>
+              <button className="text-gray-400 hover:text-gray-600 text-lg leading-none" onClick={() => setShowActivityModal(false)}>✕</button>
+            </div>
+            <div className="overflow-y-auto p-6 space-y-3">
+              {unifiedTimeline.map(renderTimelineItem)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showComponentsModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setShowComponentsModal(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+              <h3 className="font-bold text-gray-900">Riwayat Komponen LPS</h3>
+              <button className="text-gray-400 hover:text-gray-600 text-lg leading-none" onClick={() => setShowComponentsModal(false)}>✕</button>
+            </div>
+            <div className="overflow-y-auto p-6 space-y-4">
+              {['AT', 'DC', 'GR'].map((ct) => renderComponentSection(ct, null))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {replaceModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">

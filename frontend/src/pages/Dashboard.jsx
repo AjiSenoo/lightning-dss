@@ -200,7 +200,11 @@ export default function Dashboard() {
             </button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {summary.critical_top3.map((a, i) => (
+            {[...(summary.critical_top3 ?? [])].sort((a, b) => {
+              const aScore = a.ahi_safety ?? a.ahi_breakdown?.ahi_safety ?? a.skor_kesehatan_aset ?? 1
+              const bScore = b.ahi_safety ?? b.ahi_breakdown?.ahi_safety ?? b.skor_kesehatan_aset ?? 1
+              return aScore - bScore
+            }).map((a, i) => (
               <div key={a.asset_id} className={`animate-fade-in-up stagger-${i + 1}`}>
                 <CriticalAssetCard asset={a} onClick={() => navigate(`/assets/${a.asset_id}`)} />
               </div>

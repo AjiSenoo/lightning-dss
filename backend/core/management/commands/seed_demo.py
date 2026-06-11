@@ -191,7 +191,15 @@ class Command(BaseCommand):
                 )
             self.stdout.write(f'  {"Created" if created else "Exists"} asset [{org_b.nama}]: {asset.nama_gedung}')
 
-        # ── Demo Laporan ────────────────────────────────────────────────────────
+        # ── Formula-driven bulk demo data ────────────────────────────────────
+        all_assets = list(AssetRegistry.objects.filter(deleted_at__isnull=True))
+
+        def teknisi_for(asset):
+            return teknisi if asset.organization_id == org_a.pk else teknisi2
+
+        self._seed_events_auto(all_assets, creator=manager)
+
+        # ── Demo Laporan (after events so _snapshot_health sees event history) ─
         if InspectionLog.objects.filter(catatan_teknisi__startswith='[DEMO]').exists():
             self.stdout.write('  Demo laporan already seeded, skipping.')
         else:
@@ -204,13 +212,6 @@ class Command(BaseCommand):
         else:
             self._seed_notifications(teknisi, manager)
 
-        # ── Formula-driven bulk demo data ────────────────────────────────────
-        all_assets = list(AssetRegistry.objects.filter(deleted_at__isnull=True))
-
-        def teknisi_for(asset):
-            return teknisi if asset.organization_id == org_a.pk else teknisi2
-
-        self._seed_events_auto(all_assets, creator=manager)
         self._seed_inspections_auto(all_assets, teknisi_for_asset=teknisi_for)
         self._seed_maintenance_auto(all_assets, teknisi_for_asset=teknisi_for)
 
@@ -242,6 +243,9 @@ class Command(BaseCommand):
             updated_by=teknisi,
         )
         InspectionLog.objects.filter(pk=log1.pk).update(created_at=now - timedelta(days=3))
+        snap1 = self._snapshot_health(kilang, log1, as_of=log1.tgl_inspeksi)
+        if snap1 is not None:
+            InspectionLog.objects.filter(pk=log1.pk).update(health_after=snap1)
         a1 = InspectionLogAudit.objects.create(
             inspection=log1, actor=teknisi, action='create',
             note='Inspeksi baru dibuat',
@@ -277,6 +281,9 @@ class Command(BaseCommand):
             updated_by=manager,
         )
         InspectionLog.objects.filter(pk=log2.pk).update(created_at=now - timedelta(days=5))
+        snap2 = self._snapshot_health(kilang, log2, as_of=log2.tgl_inspeksi)
+        if snap2 is not None:
+            InspectionLog.objects.filter(pk=log2.pk).update(health_after=snap2)
         a2a = InspectionLogAudit.objects.create(
             inspection=log2, actor=teknisi, action='create',
             note='Inspeksi baru dibuat',
@@ -316,6 +323,9 @@ class Command(BaseCommand):
             updated_by=teknisi,
         )
         InspectionLog.objects.filter(pk=log3_orig.pk).update(created_at=now - timedelta(days=10))
+        snap3o = self._snapshot_health(tangki, log3_orig, as_of=log3_orig.tgl_inspeksi)
+        if snap3o is not None:
+            InspectionLog.objects.filter(pk=log3_orig.pk).update(health_after=snap3o)
 
         log3_amend = InspectionLog.objects.create(
             asset=tangki, user=manager,
@@ -327,6 +337,9 @@ class Command(BaseCommand):
             updated_by=manager,
         )
         InspectionLog.objects.filter(pk=log3_amend.pk).update(created_at=now - timedelta(days=8))
+        snap3a = self._snapshot_health(tangki, log3_amend, as_of=log3_amend.tgl_inspeksi)
+        if snap3a is not None:
+            InspectionLog.objects.filter(pk=log3_amend.pk).update(health_after=snap3a)
 
         a3a = InspectionLogAudit.objects.create(
             inspection=log3_orig, actor=teknisi, action='create',
@@ -364,6 +377,9 @@ class Command(BaseCommand):
             updated_by=teknisi,
         )
         InspectionLog.objects.filter(pk=log4.pk).update(created_at=now - timedelta(days=15))
+        snap4 = self._snapshot_health(menara, log4, as_of=log4.tgl_inspeksi)
+        if snap4 is not None:
+            InspectionLog.objects.filter(pk=log4.pk).update(health_after=snap4)
 
         a4a = InspectionLogAudit.objects.create(
             inspection=log4, actor=teknisi, action='create',
@@ -465,6 +481,55 @@ class Command(BaseCommand):
 
     # ── Helpers ─────────────────────────────────────────────────────────────
 
+    def _snapshot_health(self, asset, log, as_of):
+        """
+        Point-in-time AHI_safety for an inspection at `as_of`.
+        Mirrors fuzzy_engine.health_index but filters events to <= as_of
+        and uses as_of for age instead of today(), so seeded historical
+        inspections produce a meaningful trend.
+        """
+        from fuzzy_engine.health_index import per_event_damage
+        from fuzzy_engine import fuzzy_config as cfg
+
+        active = list(asset.components.filter(end_date__isnull=True, deleted_at__isnull=True))
+        if not active:
+            return None
+
+        statuses = {s.component.component_type: s.status for s in log.component_statuses.all()}
+
+        ahi_values = []
+        for c in active:
+            events = asset.events.filter(
+                timestamp__date__gte=c.install_date,
+                timestamp__lte=as_of,
+            )
+            total = sum(
+                per_event_damage(c.component_type, e.estimasi_arus_puncak_ka, asset.lpl_grade)
+                for e in events
+            )
+            stress = max(1.0 - total / cfg.REFERENCE_DAMAGE_THRESHOLD, 0.0)
+
+            penalty = cfg.COMPONENT_PENALTY.get(statuses.get(c.component_type, 'OK'), 0.0)
+            physical = max(1.0 - penalty, 0.0)
+
+            years = (as_of.date() - c.install_date).days / 365.25
+            lifespan = cfg.DESIGN_LIFESPAN_BY_COMPONENT[c.component_type]
+            age = max(1.0 - years / lifespan, 0.0)
+            if (
+                c.component_type == 'GR'
+                and asset.resistivitas_tanah is not None
+                and asset.resistivitas_tanah < cfg.SOIL_RESISTIVITY_THRESHOLD
+            ):
+                age = max(age - cfg.CORROSION_PENALTY, 0.0)
+
+            ahi_values.append(
+                cfg.W_CUMULATIVE_STRESS * stress
+                + cfg.W_PHYSICAL_CONDITION * physical
+                + cfg.W_CALENDAR_AGE * age
+            )
+
+        return round(min(ahi_values), 4)
+
     @staticmethod
     def _weighted(rng, choices):
         vals = [v for v, _ in choices]
@@ -513,8 +578,6 @@ class Command(BaseCommand):
 
     def _seed_inspections_auto(self, assets, teknisi_for_asset):
         """Create 5-8 inspections per asset with formula-driven health_after values."""
-        from fuzzy_engine import update_asset_health
-
         if InspectionLog.objects.filter(catatan_teknisi__startswith='[DEMO-AUTO]').exists():
             self.stdout.write('  Auto inspections already seeded, skipping.')
             return
@@ -547,14 +610,12 @@ class Command(BaseCommand):
                 )
                 InspectionLog.objects.filter(pk=log.pk).update(created_at=ts)
 
-                linked = asset.events.filter(timestamp__lte=ts).order_by('-timestamp').first()
                 try:
-                    feedback = update_asset_health(asset, log, linked_event=linked)
-                    InspectionLog.objects.filter(pk=log.pk).update(
-                        health_after=feedback['health_after']
-                    )
+                    snapshot = self._snapshot_health(asset, log, as_of=ts)
+                    if snapshot is not None:
+                        InspectionLog.objects.filter(pk=log.pk).update(health_after=snapshot)
                 except Exception as exc:
-                    self.stdout.write(f'  Warning: health update skipped: {exc}')
+                    self.stdout.write(f'  Warning: health snapshot skipped: {exc}')
                 total += 1
 
         self.stdout.write(f'  Created {total} auto inspections across {len(assets)} assets.')

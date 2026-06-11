@@ -2,7 +2,7 @@ import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Cell,
 } from 'recharts'
-import { formatDate } from '../utils/constants'
+import { formatDate, formatDateTime } from '../utils/constants'
 
 const URGENCY_COLORS = {
   'Inspeksi Rutin':      '#22C55E',
@@ -20,7 +20,7 @@ function CustomTooltip({ active, payload }) {
   const p = payload[0].payload
   return (
     <div className="bg-white border border-gray-200 rounded-lg shadow px-3 py-2 text-xs space-y-0.5">
-      <p className="font-semibold text-gray-800">{formatDate(new Date(p.ts))}</p>
+      <p className="font-semibold text-gray-800">{formatDateTime(new Date(p.ts))}</p>
       <p className="text-gray-600">{p.ipeak} kA</p>
       {p.label && <p style={{ color: p.color }}>{p.label}</p>}
     </div>
