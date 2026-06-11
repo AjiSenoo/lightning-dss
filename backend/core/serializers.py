@@ -102,6 +102,9 @@ class ComponentMaintenanceActionSerializer(serializers.ModelSerializer):
 
 class AssetRegistrySerializer(serializers.ModelSerializer):
     kapasitas_desain_ka     = serializers.IntegerField(read_only=True)
+    # Optional: tahun_instalasi is derived from tanggal_instalasi when the precise date
+    # is supplied (the model's save() handles it), so the date picker can be the only input.
+    tahun_instalasi         = serializers.IntegerField(required=False)
     organization_nama       = serializers.CharField(source='organization.nama', read_only=True)
     deleted_by_nama         = serializers.CharField(source='deleted_by.nama_lengkap', read_only=True)
     deleted_by_username     = serializers.CharField(source='deleted_by.username', read_only=True)
@@ -115,7 +118,7 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
         model = AssetRegistry
         fields = [
             'asset_id', 'organization', 'organization_nama', 'nama_gedung', 'lokasi_gps', 'lpl_grade',
-            'kapasitas_desain_ka', 'tahun_instalasi', 'skor_kesehatan_aset',
+            'kapasitas_desain_ka', 'tahun_instalasi', 'tanggal_instalasi', 'skor_kesehatan_aset',
             'jenis_material_konduktor', 'resistivitas_tanah', 'catatan',
             'created_at', 'updated_at',
             'deleted_at', 'deleted_by', 'deleted_by_nama', 'deleted_by_username',
@@ -129,6 +132,19 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
             # Cached AHI snapshot — recomputed by the engine, never client-writable.
             'skor_kesehatan_aset',
         ]
+
+    def validate(self, attrs):
+        # Accept either a precise tanggal_instalasi (preferred) or a year-only
+        # tahun_instalasi (legacy). At least one must be present on create.
+        tanggal = attrs.get('tanggal_instalasi')
+        tahun = attrs.get('tahun_instalasi')
+        if self.instance is None and tanggal is None and tahun is None:
+            raise serializers.ValidationError(
+                {'tanggal_instalasi': 'Tanggal instalasi (atau tahun instalasi) wajib diisi.'}
+            )
+        if tanggal is not None:
+            attrs['tahun_instalasi'] = tanggal.year
+        return attrs
 
     def get_d_asset(self, obj):
         return round(1.0 - obj.skor_kesehatan_aset, 4)
@@ -318,7 +334,7 @@ class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notification
         fields = ['notif_id', 'actor', 'actor_nama', 'actor_username', 'actor_role',
-                  'verb', 'inspection', 'event', 'asset',
+                  'verb', 'inspection', 'event', 'asset', 'component',
                   'target_label', 'link_url',
                   'is_read', 'read_at', 'created_at']
         read_only_fields = fields
@@ -327,6 +343,8 @@ class NotificationSerializer(serializers.ModelSerializer):
         return obj.read_at is not None
 
     def get_target_label(self, obj):
+        if obj.component_id and obj.component.asset_id:
+            return f'{obj.component.get_component_type_display()} · {obj.component.asset.nama_gedung}'
         if obj.inspection_id and obj.inspection.asset_id:
             return obj.inspection.asset.nama_gedung
         if obj.event_id and obj.event.asset_id:
@@ -340,6 +358,8 @@ class NotificationSerializer(serializers.ModelSerializer):
             return f'/inspections/{obj.inspection_id}'
         if obj.event_id:
             return f'/assets/{obj.event.asset_id}'
+        if obj.component_id:
+            return f'/assets/{obj.component.asset_id}'
         if obj.asset_id:
             if obj.verb == 'asset_delete':
                 return '/assets/trash'

@@ -4,11 +4,13 @@ import { LPL_LABELS } from '../utils/constants'
 
 const LPL_OPTIONS = ['I', 'II', 'III', 'IV']
 
+const today = () => new Date().toISOString().slice(0, 10)
+
 const EMPTY = {
   nama_gedung: '',
   lokasi_gps: '',
   lpl_grade: 'III',
-  tahun_instalasi: new Date().getFullYear(),
+  tanggal_instalasi: today(),
   jenis_material_konduktor: '',
   resistivitas_tanah: '',
   catatan: '',
@@ -34,7 +36,9 @@ export default function AssetForm({ asset = null, onClose, onSaved }) {
         nama_gedung: asset.nama_gedung || '',
         lokasi_gps: asset.lokasi_gps || '',
         lpl_grade: asset.lpl_grade || 'III',
-        tahun_instalasi: asset.tahun_instalasi || new Date().getFullYear(),
+        tanggal_instalasi:
+          asset.tanggal_instalasi ||
+          (asset.tahun_instalasi ? `${asset.tahun_instalasi}-01-01` : today()),
         jenis_material_konduktor: asset.jenis_material_konduktor || '',
         resistivitas_tanah: asset.resistivitas_tanah ?? '',
         catatan: asset.catatan || '',
@@ -57,7 +61,6 @@ export default function AssetForm({ asset = null, onClose, onSaved }) {
     try {
       const payload = {
         ...form,
-        tahun_instalasi: parseInt(form.tahun_instalasi, 10),
         resistivitas_tanah: form.resistivitas_tanah === '' ? null : parseFloat(form.resistivitas_tanah),
       }
       const res = isEdit
@@ -139,14 +142,13 @@ export default function AssetForm({ asset = null, onClose, onSaved }) {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-sm font-medium text-gray-700">Tahun Instalasi *</label>
+              <label className="text-sm font-medium text-gray-700">Tanggal Instalasi *</label>
               <input
-                type="number"
-                min="1990"
-                max="2100"
+                type="date"
+                max={today()}
                 className="form-input mt-1"
-                value={form.tahun_instalasi}
-                onChange={(e) => setField('tahun_instalasi')(e.target.value)}
+                value={form.tanggal_instalasi}
+                onChange={(e) => setField('tanggal_instalasi')(e.target.value)}
                 required
               />
             </div>

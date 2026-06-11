@@ -245,11 +245,14 @@ class AssetViewSet(viewsets.ModelViewSet):
         catatan_penggantian = (request.data.get('catatan_penggantian') or '').strip()
         if not catatan_penggantian:
             return Response({'detail': 'Catatan penggantian wajib diisi.'}, status=status.HTTP_400_BAD_REQUEST)
+        # The replacement happens now, so the fresh components should age from the
+        # replacement date — default to today, or accept an explicit (back)date.
+        tanggal_instalasi = request.data.get('tanggal_instalasi') or timezone.localdate().isoformat()
         new_data = {
             'nama_gedung':             request.data.get('nama_gedung', old.nama_gedung),
             'lokasi_gps':              request.data.get('lokasi_gps', old.lokasi_gps),
             'lpl_grade':               request.data.get('lpl_grade', old.lpl_grade),
-            'tahun_instalasi':         request.data.get('tahun_instalasi', old.tahun_instalasi),
+            'tanggal_instalasi':       tanggal_instalasi,
             'jenis_material_konduktor': request.data.get('jenis_material_konduktor', old.jenis_material_konduktor),
             'resistivitas_tanah':      request.data.get('resistivitas_tanah', old.resistivitas_tanah),
             'catatan':                 request.data.get('catatan', old.catatan),
@@ -906,7 +909,8 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
                 .select_related('actor',
                                 'inspection', 'inspection__asset',
                                 'event', 'event__asset',
-                                'asset'))
+                                'asset',
+                                'component', 'component__asset'))
 
     @action(detail=False, methods=['get'])
     def unread_count(self, request):
@@ -1076,11 +1080,25 @@ class ComponentMaintenanceActionViewSet(viewsets.ModelViewSet):
         component        = serializer.validated_data['component']
         performed_at     = serializer.validated_data['performed_at']
 
+        # Only a currently-active component can be replaced. Guarding here prevents a
+        # second active component of the same type from ever being created, which would
+        # violate the one_active_component_per_type_per_asset constraint.
+        if action_type == 'replace' and (component.end_date is not None or component.deleted_at is not None):
+            return Response(
+                {'detail': 'Komponen sudah tidak aktif / sudah diganti dan tidak dapat diganti lagi.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
         with transaction.atomic():
             if action_type == 'replace':
-                # End-date the current component and create its successor
                 install_date = performed_at.date() if hasattr(performed_at, 'date') else performed_at
                 old_component = component
+
+                # End-date the predecessor FIRST so it is no longer "active", then create
+                # the successor — otherwise two active rows of the same type coexist
+                # momentarily and the partial-unique constraint raises IntegrityError.
+                old_component.end_date = install_date
+                old_component.save(update_fields=['end_date', 'updated_at'])
 
                 new_component = AssetComponent.objects.create(
                     asset=old_component.asset,
@@ -1088,9 +1106,10 @@ class ComponentMaintenanceActionViewSet(viewsets.ModelViewSet):
                     install_date=install_date,
                     design_capacity_ka=old_component.design_capacity_ka,
                 )
-                old_component.end_date = install_date
+
+                # Link the chain back now that the successor exists (replaced_by is nullable).
                 old_component.replaced_by = new_component
-                old_component.save(update_fields=['end_date', 'replaced_by', 'updated_at'])
+                old_component.save(update_fields=['replaced_by', 'updated_at'])
 
                 # Record the action against the NEW component
                 maintenance_action = ComponentMaintenanceAction.objects.create(

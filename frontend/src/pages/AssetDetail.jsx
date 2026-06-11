@@ -206,7 +206,7 @@ export default function AssetDetail() {
     setReplaceModal((prev) => ({ ...prev, saving: true }))
     try {
       const res = await client.post(`/assets/${id}/replace/`, {
-        tahun_instalasi: parseInt(m.tahun_instalasi, 10),
+        tanggal_instalasi: m.tanggal_instalasi,
         catatan_penggantian: m.catatan_penggantian,
       })
       setReplaceModal(null)
@@ -419,7 +419,7 @@ export default function AssetDetail() {
                 <button
                   className="text-sm bg-purple-50 hover:bg-purple-100 text-purple-700 px-3 py-2 rounded-lg font-medium"
                   onClick={() => setReplaceModal({
-                    tahun_instalasi: new Date().getFullYear(),
+                    tanggal_instalasi: new Date().toISOString().slice(0, 10),
                     catatan_penggantian: '',
                   })}
                 >
@@ -685,14 +685,13 @@ export default function AssetDetail() {
             </div>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-gray-500 block mb-1">Tahun instalasi aset baru</label>
+                <label className="text-xs text-gray-500 block mb-1">Tanggal instalasi aset baru</label>
                 <input
-                  type="number"
+                  type="date"
                   className="input w-full"
-                  min="1990"
-                  max="2100"
-                  value={replaceModal.tahun_instalasi}
-                  onChange={(e) => setReplaceModal((m) => ({ ...m, tahun_instalasi: e.target.value }))}
+                  max={new Date().toISOString().slice(0, 10)}
+                  value={replaceModal.tanggal_instalasi}
+                  onChange={(e) => setReplaceModal((m) => ({ ...m, tanggal_instalasi: e.target.value }))}
                 />
               </div>
               <div>

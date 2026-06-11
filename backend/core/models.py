@@ -110,6 +110,9 @@ class AssetRegistry(models.Model):
     lpl_grade = models.CharField(max_length=4, choices=LPL_CHOICES)
     kapasitas_desain_ka = models.IntegerField(editable=False, help_text="Auto-filled from LPL grade")
     tahun_instalasi = models.IntegerField()
+    tanggal_instalasi = models.DateField(null=True, blank=True,
+        help_text="Tanggal instalasi presisi; tahun_instalasi diturunkan dari sini. "
+                  "Dipakai untuk menanggali komponen saat aset dibuat/diganti.")
     skor_kesehatan_aset = models.FloatField(default=1.0,
         help_text="Cached AHI_safety (stress + physical + age). Synced via recompute_health(); see health_recomputed_at.")
     health_recomputed_at = models.DateTimeField(null=True, blank=True, db_index=True,
@@ -129,12 +132,18 @@ class AssetRegistry(models.Model):
     def save(self, *args, **kwargs):
         is_new = self._state.adding
         self.kapasitas_desain_ka = LPL_CAPACITY_MAP.get(self.lpl_grade, 100)
+        # Keep tahun_instalasi in sync as a derived display/query field when a precise
+        # install date is provided.
+        if self.tanggal_instalasi:
+            self.tahun_instalasi = self.tanggal_instalasi.year
         super().save(*args, **kwargs)
         if is_new:
             self._ensure_default_components()
 
     def _ensure_default_components(self):
-        install_date = datetime.date(self.tahun_instalasi, 1, 1)
+        # Prefer the precise install date; fall back to Jan 1 of the install year for
+        # legacy/year-only registrations where the exact day is unknown.
+        install_date = self.tanggal_instalasi or datetime.date(self.tahun_instalasi, 1, 1)
         for ct in ('AT', 'DC', 'GR'):
             exists = self.components.filter(
                 component_type=ct, end_date__isnull=True, deleted_at__isnull=True
@@ -453,6 +462,8 @@ NOTIFICATION_VERBS = [
     ('asset_update',        'Asset Edited'),
     ('asset_delete',        'Asset Soft-deleted'),
     ('asset_restore',       'Asset Restored'),
+    ('component_eol_warning', 'Komponen mendekati masa pakai'),
+    ('component_eol_urgent',  'Komponen hampir habis masa pakai'),
 ]
 
 
@@ -460,10 +471,11 @@ class Notification(models.Model):
     notif_id   = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     recipient  = models.ForeignKey('User', on_delete=models.CASCADE, related_name='notifications')
     actor      = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
-    verb       = models.CharField(max_length=20, choices=NOTIFICATION_VERBS)
+    verb       = models.CharField(max_length=30, choices=NOTIFICATION_VERBS)
     inspection = models.ForeignKey(InspectionLog,  on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
     event      = models.ForeignKey(LightningEvent, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
     asset      = models.ForeignKey(AssetRegistry,  on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    component  = models.ForeignKey('AssetComponent', on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
     read_at    = models.DateTimeField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
@@ -493,6 +505,11 @@ class AssetComponent(models.Model):
     design_capacity_ka  = models.FloatField(null=True, blank=True,
                                             help_text="Optional override; null → inherit from asset LPL")
     catatan             = models.TextField(blank=True, default='')
+    # End-of-life notification state (see check_component_lifespan command).
+    last_eol_notified_at = models.DateTimeField(null=True, blank=True,
+                                                help_text="When the last EOL notification fired (cooldown anchor)")
+    last_eol_tier        = models.CharField(max_length=10, blank=True, default='',
+                                            help_text="Last EOL tier notified: '' | 'warning' | 'urgent'")
     created_at          = models.DateTimeField(auto_now_add=True)
     updated_at          = models.DateTimeField(auto_now=True)
     deleted_at          = models.DateTimeField(null=True, blank=True, db_index=True)

@@ -202,3 +202,11 @@ STALE_NOTIFY_COOLDOWN_DAYS      = int(os.environ.get('STALE_NOTIFY_COOLDOWN_DAYS
 # Hours before skor_kesehatan_aset is considered stale and must be recomputed from AHI.
 # Smaller = more up-to-date age decay; larger = fewer DB writes on busy fleets.
 HEALTH_RECOMPUTE_TTL_HOURS = int(os.environ.get('HEALTH_RECOMPUTE_TTL_HOURS', '6'))
+
+# Component end-of-life notifications (see check_component_lifespan command).
+# Fraction of design lifespan consumed before warning/urgent notifications fire, plus a
+# remaining-months trigger for the urgent tier. Cooldown caps re-notification frequency.
+COMPONENT_EOL_WARNING_FRACTION     = float(os.environ.get('COMPONENT_EOL_WARNING_FRACTION', '0.80'))
+COMPONENT_EOL_URGENT_FRACTION      = float(os.environ.get('COMPONENT_EOL_URGENT_FRACTION', '0.95'))
+COMPONENT_EOL_URGENT_MONTHS        = int(os.environ.get('COMPONENT_EOL_URGENT_MONTHS', '3'))
+COMPONENT_EOL_NOTIFY_COOLDOWN_DAYS = int(os.environ.get('COMPONENT_EOL_NOTIFY_COOLDOWN_DAYS', '30'))

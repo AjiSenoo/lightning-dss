@@ -18,12 +18,17 @@ const VERB_LABELS = {
   asset_update:     'mengedit aset:',
   asset_delete:     'memindah aset ke Tempat Sampah:',
   asset_restore:    'memulihkan aset dari Tempat Sampah:',
+  component_eol_warning: 'Komponen mendekati masa pakai:',
+  component_eol_urgent:  'Komponen hampir habis masa pakai:',
 }
+
+// System-generated notifications have no actor — render label + target only.
+const NO_ACTOR_VERBS = ['lightning', 'stale_asset', 'component_eol_warning', 'component_eol_urgent']
 
 function renderText(notif) {
   const label = VERB_LABELS[notif.verb] || notif.verb
   const target = notif.target_label || ''
-  if (['lightning', 'stale_asset'].includes(notif.verb)) {
+  if (NO_ACTOR_VERBS.includes(notif.verb)) {
     return `${label} ${target}`
   }
   const actor = notif.actor_nama || notif.actor_username || 'Seseorang'

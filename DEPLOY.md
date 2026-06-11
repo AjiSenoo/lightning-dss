@@ -98,6 +98,24 @@ No domain is required to start, but secure cookies and HSTS need TLS. Easiest pa
    `CSRF_COOKIE_SECURE=True`, and update `ALLOWED_HOSTS` / `CSRF_TRUSTED_ORIGINS`
    to the `https://` domain.
 
+## Scheduled maintenance jobs
+
+A few management commands are meant to run periodically. Add them to the host crontab
+(`crontab -e`), pointing at the running `web` container — example (daily at 02:00):
+
+```cron
+0 2 * * * cd /path/to/lightning-dss && docker compose -f docker-compose.prod.yml exec -T web \
+  python manage.py check_component_lifespan >> /var/log/lightning-eol.log 2>&1
+30 2 * * * cd /path/to/lightning-dss && docker compose -f docker-compose.prod.yml exec -T web \
+  python manage.py check_stale_inspections >> /var/log/lightning-stale.log 2>&1
+```
+
+- `check_component_lifespan` — notifies Manajer + Teknisi when a component nears its design
+  end-of-life (warning at 80% of lifespan, urgent at 95% or < 3 months left). Thresholds and
+  cooldown are tunable via `COMPONENT_EOL_*` env vars in `.env`.
+- `check_stale_inspections` — notifies managers of assets overdue for inspection.
+- `purge_deleted_inspections` — hard-deletes trashed inspections past the grace window.
+
 ## Security notes
 
 - Postgres is **not** published to the host — only the internal compose network.
