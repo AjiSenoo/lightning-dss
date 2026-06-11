@@ -29,23 +29,15 @@ def calculate_expected_damage_level(fuzzy_label):
     return cfg.EXPECTED_DAMAGE.get(fuzzy_label, 0.1)
 
 
-def _all_components_ok(inspection_log):
-    """Check if every required component status is OK."""
-    return (
-        inspection_log.status_air_terminal == 'OK'
-        and inspection_log.status_down_conductor == 'OK'
-        and inspection_log.status_grounding == 'OK'
-    )
-
 
 def update_asset_health(asset, inspection_log, linked_event=None):
     """
-    Update asset health score based on inspection findings vs predictions.
+    Recompute asset health from AHI after an inspection (includes age + stress + physical).
 
-    Asymmetric by design: penalty 5x faster than recovery.
+    The old asymmetric penalty/recovery was replaced by a full AHI recompute so that
+    calendar-age degradation is always reflected alongside inspection findings.
 
-    Returns dict: health_before, health_after, actual_damage, expected_damage,
-                  discrepancy, action
+    Returns dict: health_before, health_after, actual_damage, expected_damage, discrepancy, action
     """
     health_before = asset.skor_kesehatan_aset
     actual = calculate_actual_damage_score(inspection_log)
@@ -57,18 +49,13 @@ def update_asset_health(asset, inspection_log, linked_event=None):
         discrepancy = actual
         expected = 0.0
 
+    asset.recompute_health()
+
     action = 'unchanged'
-
-    if discrepancy > 0:
-        penalty = discrepancy * cfg.LEARNING_RATE
-        asset.skor_kesehatan_aset = max(asset.skor_kesehatan_aset - penalty, 0.0)
+    if asset.skor_kesehatan_aset < health_before:
         action = 'penalty'
-    elif discrepancy < 0 and _all_components_ok(inspection_log):
-        recovery = abs(discrepancy) * cfg.RECOVERY_RATE
-        asset.skor_kesehatan_aset = min(asset.skor_kesehatan_aset + recovery, 1.0)
+    elif asset.skor_kesehatan_aset > health_before:
         action = 'recovery'
-
-    asset.save()
 
     return {
         'health_before': round(health_before, 4),
