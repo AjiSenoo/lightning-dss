@@ -17,6 +17,12 @@ client.interceptors.request.use((config) => {
     config.headers = config.headers || {}
     config.headers.Authorization = `Bearer ${token}`
   }
+  // For file uploads (inspection photos), drop the instance-default JSON content type
+  // so axios sets multipart/form-data with the correct boundary. Without this the
+  // backend can't parse the upload and photos silently fail.
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData && config.headers) {
+    delete config.headers['Content-Type']
+  }
   return config
 })
 
