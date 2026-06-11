@@ -120,7 +120,10 @@ def run_inference_per_component(r_stress_value: float, component_ahis: dict) -> 
         ct: run_inference(r_stress_value, 1.0 - ahi)
         for ct, ahi in component_ahis.items()
     }
-    safety_d_asset = 1.0 - min(component_ahis.values())
+    # No components → treat the asset as fully healthy (d_asset = 0) rather than
+    # crashing on an empty min().
+    worst_ahi = min(component_ahis.values()) if component_ahis else 1.0
+    safety_d_asset = 1.0 - worst_ahi
     asset_level = run_inference(r_stress_value, safety_d_asset)
 
     return {

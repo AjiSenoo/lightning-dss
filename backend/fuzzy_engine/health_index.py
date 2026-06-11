@@ -79,10 +79,22 @@ def calculate_component_ahi(component, asset) -> dict:
     # Latest inspection status for this specific component
     latest_status = (
         component.status_history
-        .select_related()
+        .select_related('inspection')
         .order_by('-inspection__tgl_inspeksi')
         .first()
     )
+
+    # A repair action after the latest inspection clears the physical penalty.
+    # Stress and age are untouched — only `ganti` (replace) resets those clocks.
+    if latest_status is not None:
+        latest_repair = (
+            component.maintenance_actions
+            .filter(action='repair', performed_at__gt=latest_status.inspection.tgl_inspeksi)
+            .order_by('-performed_at')
+            .first()
+        )
+        if latest_repair is not None:
+            latest_status = None
 
     stress  = _stress_score(component.component_type, asset.lpl_grade, events_since_install)
     physical = _physical_score(latest_status)
@@ -131,6 +143,16 @@ def aggregate_asset_ahi(component_results: dict) -> dict:
         per_component — full per-component detail
     """
     ahi_by_type = {ct: r['ahi'] for ct, r in component_results.items()}
+
+    # An asset with no active components has no measurable degradation to report.
+    # Return a neutral (healthy) aggregate instead of crashing on empty min()/sum().
+    if not ahi_by_type:
+        return {
+            'ahi_safety':      1.0,
+            'ahi_overall':     1.0,
+            'worst_component': None,
+            'per_component':   {},
+        }
 
     safety  = min(ahi_by_type.values())
     overall = sum(cfg.COMPONENT_WEIGHTS[ct] * v for ct, v in ahi_by_type.items())

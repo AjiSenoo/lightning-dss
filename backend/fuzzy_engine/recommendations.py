@@ -125,6 +125,14 @@ def recommend_for_asset(per_component_ahi: dict, per_component_fuzzy: dict,
         measurement  = latest_measurements.get(ct)
         recs.append(recommend_for_component(ct, ahi_result, fuzzy_result, measurement))
 
+    # No components → no recommendations; return an empty rollup instead of crashing.
+    if not recs:
+        return {
+            'per_component':  [],
+            'headline':       None,
+            'action_summary': '',
+        }
+
     headline = max(recs, key=lambda r: _URGENCY_RANK.get(r['urgency_label'], 0))
 
     action_counts = {}
