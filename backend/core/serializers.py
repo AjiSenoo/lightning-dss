@@ -1,6 +1,9 @@
+import logging
 from datetime import timedelta
 from django.conf import settings
 from rest_framework import serializers
+
+logger = logging.getLogger(__name__)
 from .models import (
     AssetRegistry, AssetAudit, LightningEvent, InspectionLog, InspectionPhoto,
     InspectionLogAudit, Notification, User, Organization,
@@ -123,6 +126,8 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
             'asset_id', 'kapasitas_desain_ka', 'organization_nama',
             'created_at', 'updated_at',
             'deleted_by_nama', 'deleted_by_username',
+            # Cached AHI snapshot — recomputed by the engine, never client-writable.
+            'skor_kesehatan_aset',
         ]
 
     def get_d_asset(self, obj):
@@ -145,9 +150,9 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
 
     def get_ahi_breakdown(self, obj):
         try:
-            from fuzzy_engine import calculate_asset_health
-            return calculate_asset_health(obj)
+            return obj.cached_health()
         except Exception:
+            logger.exception('ahi_breakdown failed for asset %s', obj.pk)
             return None
 
     def get_recommendations(self, obj):
@@ -156,8 +161,8 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
         if view and getattr(view, 'action', None) != 'retrieve':
             return None
         try:
-            from fuzzy_engine import calculate_asset_health, run_inference_per_component, recommend_for_asset
-            health = calculate_asset_health(obj)
+            from fuzzy_engine import run_inference_per_component, recommend_for_asset
+            health = obj.cached_health()
             per_ahi = {ct: r for ct, r in health['per_component'].items()}
             ahi_by_type = {ct: r['ahi'] for ct, r in per_ahi.items()}
             latest_event = obj.events.first()
@@ -181,6 +186,7 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
                 latest_measurements={'GR': latest_gr_status},
             )
         except Exception:
+            logger.exception('recommendations failed for asset %s', obj.pk)
             return None
 
 
@@ -341,13 +347,6 @@ class NotificationSerializer(serializers.ModelSerializer):
         return '/'
 
 
-class DashboardSummarySerializer(serializers.Serializer):
-    total_assets = serializers.IntegerField()
-    assets_needing_inspection = serializers.IntegerField()
-    events_last_7_days = serializers.IntegerField()
-    critical_assets = serializers.IntegerField()
-
-
 class AssetMapSerializer(serializers.ModelSerializer):
     health_status = serializers.SerializerMethodField()
     health_band   = serializers.SerializerMethodField()
@@ -365,10 +364,12 @@ class AssetMapSerializer(serializers.ModelSerializer):
 
     def _get_ahi_safety(self, obj):
         try:
-            from fuzzy_engine import calculate_asset_health
-            return calculate_asset_health(obj)['ahi_safety']
+            health = obj.cached_health()
+            if health is not None:
+                return health['ahi_safety']
         except Exception:
-            return obj.skor_kesehatan_aset
+            logger.exception('ahi_safety failed for asset %s', obj.pk)
+        return obj.skor_kesehatan_aset
 
     def get_ahi_safety(self, obj):
         return round(self._get_ahi_safety(obj), 4)

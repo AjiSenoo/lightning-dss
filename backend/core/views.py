@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 from django.db import transaction
 from django.db.models import Q
@@ -23,9 +24,11 @@ from .serializers import (
     AssetRegistrySerializer, AssetAuditSerializer, LightningEventSerializer,
     InspectionLogSerializer, InspectionLogAuditSerializer, NotificationSerializer,
     UserSerializer, OrganizationSerializer,
-    DashboardSummarySerializer, AssetMapSerializer,
+    AssetMapSerializer,
     AssetComponentSerializer, ComponentMaintenanceActionSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 TRACKED_FIELDS = [
     'tgl_inspeksi',
@@ -259,12 +262,12 @@ class AssetViewSet(viewsets.ModelViewSet):
             old.deleted_by = request.user
             old.save(update_fields=['deleted_at', 'deleted_by'])
             AssetAudit.objects.create(
-                asset=old, actor=request.user, action='replaced',
+                asset=old, actor=request.user, action='replace_out',
                 note=catatan_penggantian,
                 diff={'new_asset_id': str(new_asset.asset_id)},
             )
             AssetAudit.objects.create(
-                asset=new_asset, actor=request.user, action='replaces',
+                asset=new_asset, actor=request.user, action='replace_in',
                 note=catatan_penggantian,
                 diff={'old_asset_id': str(old.asset_id)},
             )
@@ -341,11 +344,14 @@ class EventViewSet(viewsets.ModelViewSet):
             r_stress = event.rasio_stres
             fuzzy = run_inference_per_component(r_stress, ahi_by_type)
             asset_result = fuzzy['asset']
-            event.fuzzy_output_score = asset_result['score']
-            event.fuzzy_output_label = asset_result['label']
-            event.save(update_fields=['fuzzy_output_score', 'fuzzy_output_label'])
+            # Write fuzzy outputs without going through LightningEvent.save(), which
+            # would re-trigger a (redundant) asset health recompute.
+            LightningEvent.objects.filter(pk=event.pk).update(
+                fuzzy_output_score=asset_result['score'],
+                fuzzy_output_label=asset_result['label'],
+            )
         except Exception:
-            pass
+            logger.exception('per-component fuzzy inference failed for event %s', event.pk)
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -487,6 +493,7 @@ class InspectionViewSet(viewsets.ModelViewSet):
             )
             health_after = feedback['health_after']
         except Exception:
+            logger.exception('update_asset_health failed after editing inspection %s', updated.pk)
             health_after = asset.skor_kesehatan_aset
 
         InspectionLog.objects.filter(pk=updated.pk).update(health_after=health_after)
@@ -500,48 +507,45 @@ class InspectionViewSet(viewsets.ModelViewSet):
         kwargs['partial'] = True
         return self.update(request, *args, **kwargs)
 
-    def create(self, request, *args, **kwargs):
+    def _persist_inspection(self, serializer, actor, photos):
+        """
+        Persist a validated inspection serializer + audit/notification/feedback side effects.
+
+        Shared by the single-create endpoint and the offline-sync batch endpoint so both
+        paths stay in lockstep. `actor` may be None (unauthenticated). `photos` is an
+        iterable of uploaded files (empty for JSON batch payloads).
+
+        Returns (inspection, health_before, health_after).
+        """
         from fuzzy_engine import update_asset_health
-
-        non_ok_fields = ['status_air_terminal', 'status_down_conductor', 'status_grounding']
-        needs_photo = any(request.data.get(f, 'OK') != 'OK' for f in non_ok_fields)
-        if needs_photo and not request.FILES.getlist('photos'):
-            return Response(
-                {'photos': ['Foto bukti wajib jika ada komponen yang tidak OK.']},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
 
         asset_id = serializer.validated_data['asset'].asset_id
         asset = AssetRegistry.objects.get(pk=asset_id)
         health_before = asset.skor_kesehatan_aset
 
         save_kwargs = {}
-        if not serializer.validated_data.get('user') and request.user.is_authenticated:
-            save_kwargs['user'] = request.user
+        if not serializer.validated_data.get('user') and actor is not None:
+            save_kwargs['user'] = actor
 
         with transaction.atomic():
             inspection = serializer.save(**save_kwargs)
-            inspection.updated_by = request.user if request.user.is_authenticated else None
+            inspection.updated_by = actor
             inspection.save(update_fields=['updated_by', 'updated_at'])
 
-            # Audit: create entry
             InspectionLogAudit.objects.create(
                 inspection=inspection,
-                actor=request.user if request.user.is_authenticated else None,
+                actor=actor,
                 action='create',
                 diff={f: {'old': None, 'new': str(getattr(inspection, f)) if getattr(inspection, f) is not None else None}
                       for f in TRACKED_FIELDS},
                 note='Inspeksi baru dibuat',
             )
-            _emit_laporan_notification(inspection, request.user, 'create')
-            for f in request.FILES.getlist('photos'):
+            _emit_laporan_notification(inspection, actor, 'create')
+            for f in photos:
                 photo = InspectionPhoto.objects.create(inspection=inspection, image=f)
                 InspectionLogAudit.objects.create(
                     inspection=inspection,
-                    actor=request.user if request.user.is_authenticated else None,
+                    actor=actor,
                     action='photo_added',
                     diff={'photo_id': str(photo.photo_id)},
                     note='Foto bukti ditambahkan',
@@ -555,15 +559,34 @@ class InspectionViewSet(viewsets.ModelViewSet):
             )
             health_after = feedback['health_after']
         except Exception:
+            logger.exception('update_asset_health failed after creating inspection %s', inspection.pk)
             health_after = health_before
 
         InspectionLog.objects.filter(pk=inspection.pk).update(health_after=health_after)
+        return inspection, health_before, health_after
+
+    def create(self, request, *args, **kwargs):
+        non_ok_fields = ['status_air_terminal', 'status_down_conductor', 'status_grounding']
+        needs_photo = any(request.data.get(f, 'OK') != 'OK' for f in non_ok_fields)
+        if needs_photo and not request.FILES.getlist('photos'):
+            return Response(
+                {'photos': ['Foto bukti wajib jika ada komponen yang tidak OK.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        actor = request.user if request.user.is_authenticated else None
+        inspection, health_before, health_after = self._persist_inspection(
+            serializer, actor, request.FILES.getlist('photos')
+        )
 
         data = InspectionLogSerializer(inspection).data
         data['health_before'] = health_before
         data['health_after'] = health_after
         data['updated_asset'] = AssetRegistrySerializer(
-            AssetRegistry.objects.get(pk=asset_id)
+            AssetRegistry.objects.get(pk=inspection.asset_id)
         ).data
         return Response(data, status=status.HTTP_201_CREATED)
 
@@ -658,46 +681,6 @@ class InspectionViewSet(viewsets.ModelViewSet):
             _emit_laporan_notification(instance, request.user, 'verify')
         return Response(InspectionLogSerializer(instance).data)
 
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsManagerForUsers])
-    def revoke_verification(self, request, pk=None):
-        instance = self.get_object()
-        if instance.deleted_at is not None:
-            return Response(
-                {'detail': 'Tidak dapat mencabut verifikasi laporan di Tempat Sampah.'},
-                status=status.HTTP_409_CONFLICT,
-            )
-        if instance.verified_at is None:
-            return Response(
-                {'detail': 'Laporan belum terverifikasi.'},
-                status=status.HTTP_409_CONFLICT,
-            )
-        note = (request.data.get('note') or '').strip()
-        if len(note) > 500:
-            return Response({'note': ['Catatan maksimum 500 karakter.']}, status=status.HTTP_400_BAD_REQUEST)
-        prior_verified_at = instance.verified_at
-        prior_verified_by_id = instance.verified_by_id
-        with transaction.atomic():
-            locked = InspectionLog.objects.select_for_update().get(pk=instance.pk)
-            if locked.verified_at is None:
-                return Response(
-                    {'detail': 'Laporan sudah dicabut verifikasinya oleh aksi lain.'},
-                    status=status.HTTP_409_CONFLICT,
-                )
-            locked.verified_at = None
-            locked.verified_by = None
-            locked.save(update_fields=['verified_at', 'verified_by', 'updated_at'])
-            InspectionLogAudit.objects.create(
-                inspection=locked,
-                actor=request.user,
-                action='revoke_verification',
-                diff={
-                    'verified_at_before': prior_verified_at.isoformat(),
-                    'verified_by_id_before': str(prior_verified_by_id) if prior_verified_by_id else None,
-                },
-                note=f'Verifikasi dicabut oleh Manajer{(": " + note[:120]) if note else ""}',
-            )
-            _emit_laporan_notification(locked, request.user, 'revoke_verification')
-        return Response(InspectionLogSerializer(locked).data)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsManagerForUsers])
     def request_revision(self, request, pk=None):
@@ -763,6 +746,17 @@ class InspectionViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
+        if original.amends_id is not None:
+            return Response(
+                {'detail': 'Amandemen tidak dapat diamandemen lagi. Buat amandemen dari laporan asli.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if original.amendments.exists():
+            return Response(
+                {'detail': 'Laporan ini sudah memiliki amandemen. Setiap laporan hanya dapat diamandemen satu kali.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
         from fuzzy_engine import update_asset_health
 
         non_ok_fields = ['status_air_terminal', 'status_down_conductor', 'status_grounding']
@@ -789,6 +783,12 @@ class InspectionViewSet(viewsets.ModelViewSet):
         orig_snapshot = _snapshot(original)
 
         with transaction.atomic():
+            locked_original = InspectionLog.objects.select_for_update().get(pk=original.pk)
+            if locked_original.amendments.exists():
+                return Response(
+                    {'detail': 'Laporan ini sudah memiliki amandemen. Setiap laporan hanya dapat diamandemen satu kali.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
             amendment = serializer.save(**save_kwargs)
             amend_snapshot = _snapshot(amendment)
             diff = _compute_diff(orig_snapshot, amend_snapshot)
@@ -829,6 +829,7 @@ class InspectionViewSet(viewsets.ModelViewSet):
             )
             health_after = feedback['health_after']
         except Exception:
+            logger.exception('update_asset_health failed after amending inspection %s', amendment.pk)
             health_after = health_before
 
         data = InspectionLogSerializer(amendment).data
@@ -847,11 +848,27 @@ class InspectionBatchView(APIView):
         view = InspectionViewSet()
         view.request = request
         view.format_kwarg = None
+        actor = request.user if request.user.is_authenticated else None
+        # Batch payloads are JSON only (no multipart file uploads), so any item whose
+        # status fields require photo evidence is rejected — those must be submitted
+        # individually via the multipart /inspections/ endpoint.
+        non_ok_fields = ['status_air_terminal', 'status_down_conductor', 'status_grounding']
         for item in items:
-            sub_request = request._clone()
-            sub_request._full_data = item
-            response = view.create(sub_request)
-            results.append({'success': response.status_code == 201, 'data': response.data})
+            if any(item.get(f, 'OK') != 'OK' for f in non_ok_fields):
+                results.append({
+                    'success': False,
+                    'errors': {'photos': ['Foto bukti wajib — kirim laporan ini satu per satu, bukan via batch.']},
+                })
+                continue
+            serializer = InspectionLogSerializer(data=item, context={'request': request})
+            if not serializer.is_valid():
+                results.append({'success': False, 'errors': serializer.errors})
+                continue
+            inspection, health_before, health_after = view._persist_inspection(serializer, actor, [])
+            data = InspectionLogSerializer(inspection).data
+            data['health_before'] = health_before
+            data['health_after'] = health_after
+            results.append({'success': True, 'data': data})
         return Response(results, status=status.HTTP_200_OK)
 
 
@@ -923,6 +940,16 @@ class DashboardSummaryView(APIView):
         assets_qs = AssetRegistry.objects.filter(organization=org) if org else AssetRegistry.objects.all()
         events_qs = LightningEvent.objects.filter(asset__organization=org) if org else LightningEvent.objects.all()
         inspections_qs = InspectionLog.objects.filter(asset__organization=org) if org else InspectionLog.objects.all()
+
+        # Refresh any assets whose AHI snapshot is older than the TTL so the SQL
+        # ordering/thresholds below reflect current age-based decay.
+        ttl_hours = getattr(settings, 'HEALTH_RECOMPUTE_TTL_HOURS', 6)
+        stale_cutoff = now - timedelta(hours=ttl_hours)
+        stale_assets = assets_qs.filter(
+            Q(health_recomputed_at__isnull=True) | Q(health_recomputed_at__lt=stale_cutoff)
+        )
+        for _a in stale_assets.iterator():
+            _a.recompute_health()
 
         # 7-day event sparkline (counts per day, padded with zeros for missing days)
         event_buckets = (
@@ -1076,6 +1103,8 @@ class ComponentMaintenanceActionViewSet(viewsets.ModelViewSet):
                 )
             else:
                 maintenance_action = serializer.save(performed_by=request.user)
+
+            component.asset.recompute_health()
 
         return Response(
             ComponentMaintenanceActionSerializer(maintenance_action, context={'request': request}).data,

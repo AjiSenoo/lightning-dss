@@ -1,7 +1,10 @@
 import datetime
+import logging
 import uuid
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+
+logger = logging.getLogger(__name__)
 
 
 class Organization(models.Model):
@@ -107,7 +110,10 @@ class AssetRegistry(models.Model):
     lpl_grade = models.CharField(max_length=4, choices=LPL_CHOICES)
     kapasitas_desain_ka = models.IntegerField(editable=False, help_text="Auto-filled from LPL grade")
     tahun_instalasi = models.IntegerField()
-    skor_kesehatan_aset = models.FloatField(default=1.0, help_text="0.0 (dead) to 1.0 (pristine)")
+    skor_kesehatan_aset = models.FloatField(default=1.0,
+        help_text="Cached AHI_safety (stress + physical + age). Synced via recompute_health(); see health_recomputed_at.")
+    health_recomputed_at = models.DateTimeField(null=True, blank=True, db_index=True,
+        help_text="When skor_kesehatan_aset was last synced from AHI. Drives lazy refresh TTL.")
     jenis_material_konduktor = models.CharField(max_length=50, blank=True, default='')
     resistivitas_tanah = models.FloatField(null=True, blank=True, help_text="Soil resistivity in Ω·m")
     catatan = models.TextField(blank=True, default='')
@@ -137,6 +143,59 @@ class AssetRegistry(models.Model):
                 AssetComponent.objects.create(
                     asset=self, component_type=ct, install_date=install_date,
                 )
+        self.recompute_health()
+
+    def recompute_health(self, save=True):
+        """Sync skor_kesehatan_aset from the computed AHI_safety (includes age + stress + physical)."""
+        from django.utils import timezone
+        try:
+            from fuzzy_engine import calculate_asset_health
+            result = calculate_asset_health(self)
+            self.skor_kesehatan_aset = result['ahi_safety']
+        except Exception:
+            logger.exception('recompute_health failed for asset %s; keeping previous score', self.pk)
+            result = None
+        self._health_cache = result
+        self.health_recomputed_at = timezone.now()
+        if save:
+            self.save(update_fields=['skor_kesehatan_aset', 'health_recomputed_at', 'updated_at'])
+        return result
+
+    def recompute_if_stale(self, ttl_hours=None):
+        """Recompute only if older than TTL. Called by serializers on read paths."""
+        from django.conf import settings as dj_settings
+        from django.utils import timezone
+        from datetime import timedelta
+        ttl_hours = ttl_hours or getattr(dj_settings, 'HEALTH_RECOMPUTE_TTL_HOURS', 6)
+        if (
+            self.health_recomputed_at is None
+            or self.health_recomputed_at < timezone.now() - timedelta(hours=ttl_hours)
+        ):
+            self.recompute_health()
+
+    def cached_health(self):
+        """
+        Per-instance-cached full AHI breakdown for read/serializer paths.
+
+        Computes calculate_asset_health() at most once per loaded instance (a single
+        request), refreshing the cached score first if the TTL has expired. Lets the
+        several serializer methods that need the breakdown share one computation
+        instead of recomputing (and writing) per field.
+        """
+        cache = getattr(self, '_health_cache', None)
+        if cache is not None:
+            return cache
+        self.recompute_if_stale()  # populates self._health_cache when it recomputes
+        cache = getattr(self, '_health_cache', None)
+        if cache is None:
+            try:
+                from fuzzy_engine import calculate_asset_health
+                cache = calculate_asset_health(self)
+            except Exception:
+                logger.exception('cached_health computation failed for asset %s', self.pk)
+                cache = None
+            self._health_cache = cache
+        return cache
 
     class Meta:
         db_table = 'asset_registry'
@@ -168,6 +227,10 @@ class LightningEvent(models.Model):
             except Exception:
                 self.rasio_stres = 0.0
         super().save(*args, **kwargs)
+        try:
+            self.asset.recompute_health()
+        except Exception:
+            logger.exception('recompute_health after LightningEvent save failed (event %s)', self.pk)
 
     class Meta:
         db_table = 'lightning_events'
@@ -249,6 +312,13 @@ class InspectionLog(models.Model):
     class Meta:
         db_table = 'inspection_logs'
         ordering = ['-tgl_inspeksi']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['amends'],
+                condition=models.Q(amends__isnull=False),
+                name='inspection_log_one_amendment_per_original',
+            ),
+        ]
 
     def __str__(self):
         return f"Inspection on {self.asset.nama_gedung} ({self.tgl_inspeksi.date()})"
@@ -326,11 +396,13 @@ class InspectionLogAudit(models.Model):
 
 
 ASSET_AUDIT_ACTIONS = [
-    ('create',  'Created'),
-    ('update',  'Edited'),
-    ('delete',  'Soft-deleted'),
-    ('restore', 'Restored'),
-    ('purge',   'Hard-deleted'),
+    ('create',      'Created'),
+    ('update',      'Edited'),
+    ('delete',      'Soft-deleted'),
+    ('restore',     'Restored'),
+    ('purge',       'Hard-deleted'),
+    ('replace_out', 'Replaced (superseded by new asset)'),
+    ('replace_in',  'Replaces (supersedes old asset)'),
 ]
 
 
@@ -426,6 +498,13 @@ class AssetComponent(models.Model):
     deleted_at          = models.DateTimeField(null=True, blank=True, db_index=True)
     deleted_by          = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True,
                                             related_name='components_deleted')
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        try:
+            self.asset.recompute_health()
+        except Exception:
+            logger.exception('recompute_health after AssetComponent save failed (component %s)', self.pk)
 
     class Meta:
         db_table = 'asset_components'
