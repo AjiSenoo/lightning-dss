@@ -1,0 +1,70 @@
+# Production stack for a single VPS (shared with other workloads).
+#
+#   cp .env.example .env   # then edit secrets/host
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Everything is served through nginx on ${HTTP_PORT} (default 8080), so it won't
+# collide with anything already on :80/:443. The SPA calls /api same-origin.
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lightning_dss}
+      POSTGRES_USER: ${POSTGRES_USER:-lightning}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No host port published — Postgres is only reachable on the internal network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lightning}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  web:
+    build: ./backend
+    restart: unless-stopped
+    env_file: ./.env
+    environment:
+      # Constructed from the POSTGRES_* vars; overrides any DATABASE_URL in .env.
+      DATABASE_URL: postgres://${POSTGRES_USER:-lightning}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-lightning_dss}
+    volumes:
+      - static:/app/staticfiles
+      - media:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "8000"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  nginx:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: /api
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    volumes:
+      - static:/vol/static:ro
+      - media:/vol/media:ro
+    depends_on:
+      - web
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+volumes:
+  pgdata:
+  static:
+  media:
