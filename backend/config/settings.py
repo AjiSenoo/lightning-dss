@@ -124,7 +124,13 @@ else:
         'http://localhost:3000',
     ]
 CORS_ALLOW_ALL_ORIGINS = DEBUG
-CSRF_TRUSTED_ORIGINS = CORS_ALLOWED_ORIGINS
+
+# CSRF trusted origins for the Django admin (the SPA uses bearer JWTs, not cookies).
+# Needed when admin is reached over a non-default origin, e.g. "http://<vps-ip>:8080".
+_csrf = os.environ.get('CSRF_TRUSTED_ORIGINS', '').strip()
+CSRF_TRUSTED_ORIGINS = (
+    [o.strip() for o in _csrf.split(',') if o.strip()] if _csrf else list(CORS_ALLOWED_ORIGINS)
+)
 
 # ---------------------------------------------------------------
 # Security hardening — active when DEBUG=False (production)
@@ -137,8 +143,11 @@ if not DEBUG:
     # Behind a TLS-terminating proxy (nginx, load balancer) set this header upstream.
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'True') == 'True'
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+    # Secure cookies require TLS. Keep True in real deployments; only set these
+    # False for a temporary plain-HTTP-on-IP setup (admin login won't work over
+    # HTTPS-only cookies otherwise). The SPA itself uses localStorage JWTs.
+    SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'True') == 'True'
+    CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'True') == 'True'
     SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '31536000'))  # 1 year
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
