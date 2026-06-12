@@ -8,6 +8,13 @@ const OSM_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
 const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
 const INDONESIA_CENTER = [-2.5, 118.0]
 const DEFAULT_ZOOM = 5
+// Keep the map confined to the Indonesian archipelago so it stays light:
+// the user can't pan/zoom out to the whole world, and tiles outside this box
+// are never requested. SW corner → NE corner (Sabang to Merauke, padded).
+const INDONESIA_BOUNDS = [
+  [-11.5, 94.0],
+  [6.5, 141.5],
+]
 const CACHE_ZOOM_LEVELS = [8, 9, 10, 11, 12, 13, 14]
 
 // Compute L.LatLngBounds from asset list, or null if empty/invalid
@@ -33,7 +40,12 @@ function OfflineController({ assets, saveRef }) {
   const map = useMap()
 
   useEffect(() => {
-    const tileLayer = tileLayerOffline(OSM_URL, { attribution: OSM_ATTR, maxZoom: 19 })
+    const tileLayer = tileLayerOffline(OSM_URL, {
+      attribution: OSM_ATTR,
+      maxZoom: 19,
+      noWrap: true,        // don't load repeated world copies
+      bounds: INDONESIA_BOUNDS,  // only request tiles within Indonesia
+    })
     tileLayer.addTo(map)
 
     const bounds = assetBounds(assets)
@@ -124,6 +136,9 @@ export default function AssetMap({ assets = [], height = '400px' }) {
       <MapContainer
         center={INDONESIA_CENTER}
         zoom={DEFAULT_ZOOM}
+        minZoom={DEFAULT_ZOOM}
+        maxBounds={INDONESIA_BOUNDS}
+        maxBoundsViscosity={1.0}
         style={{ height, width: '100%', borderRadius: '0.75rem' }}
       >
         <OfflineController assets={assets} saveRef={saveRef} />
