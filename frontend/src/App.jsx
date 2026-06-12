@@ -38,33 +38,34 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          {/* Landing: the root always opens the login page; Login auto-forwards
+              an already-authenticated user on to /dashboard. */}
+          <Route path="/" element={<Navigate to="/login" replace />} />
           <Route
-            path="/"
             element={
               <ProtectedRoute>
                 <Layout />
               </ProtectedRoute>
             }
           >
-            <Route index element={<Dashboard />} />
-            <Route path="assets" element={<AssetPortfolio />} />
-            <Route path="assets/trash" element={<ManagerOnly><AssetTrash /></ManagerOnly>} />
-            <Route path="assets/:id" element={<AssetDetail />} />
-            <Route path="events" element={<EventLog />} />
-            <Route path="events/new" element={<EventInput />} />
-            <Route path="inspections" element={<InspectionReport />} />
-            <Route path="inspections/new" element={<LogbookForm />} />
-            <Route path="inspections/trash" element={<ManagerOnly><LaporanTrash /></ManagerOnly>} />
-            <Route path="inspections/:id" element={<LaporanDetail />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/assets" element={<AssetPortfolio />} />
+            <Route path="/assets/trash" element={<ManagerOnly><AssetTrash /></ManagerOnly>} />
+            <Route path="/assets/:id" element={<AssetDetail />} />
+            <Route path="/events" element={<EventLog />} />
+            <Route path="/events/new" element={<EventInput />} />
+            <Route path="/inspections" element={<InspectionReport />} />
+            <Route path="/inspections/new" element={<LogbookForm />} />
+            <Route path="/inspections/trash" element={<ManagerOnly><LaporanTrash /></ManagerOnly>} />
+            <Route path="/inspections/:id" element={<LaporanDetail />} />
             <Route
-              path="users"
+              path="/users"
               element={
                 <ManagerOnly>
                   <UserManagement />
                 </ManagerOnly>
               }
             />
-            <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>

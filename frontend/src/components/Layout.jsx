@@ -7,7 +7,7 @@ import NotificationBell from './NotificationBell'
 import { useAuth, useIsManager } from '../auth/AuthContext'
 
 const BASE_NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', icon: '🏠', end: true },
+  { to: '/dashboard', label: 'Dashboard', icon: '🏠', end: true },
   { to: '/assets', label: 'Portofolio Aset', icon: '🏗️', end: true },
   { to: '/inspections', label: 'Riwayat Inspeksi', icon: '📋', end: true },
   { to: '/events', label: 'Riwayat Sambaran', icon: '🌩️', end: true },

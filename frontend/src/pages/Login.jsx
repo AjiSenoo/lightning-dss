@@ -6,7 +6,7 @@ export default function Login() {
   const { user, login, isLoading } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const redirectTo = location.state?.from || '/'
+  const redirectTo = location.state?.from || '/dashboard'
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')

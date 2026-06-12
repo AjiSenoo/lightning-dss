@@ -13,7 +13,7 @@ export default function ManagerOnly({ children }) {
     )
   }
   if (!isManager) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/dashboard" replace />
   }
   return children
 }
