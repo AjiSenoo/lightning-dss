@@ -1,6 +1,6 @@
 import logging
 from datetime import timedelta
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import viewsets, status
@@ -61,6 +61,15 @@ def _user_org(request):
     return getattr(request.user, 'organization', None)
 
 
+def _visible_assets(request):
+    """Live (non-deleted) assets scoped to the requesting user's org."""
+    org = _user_org(request)
+    qs = AssetRegistry.objects.filter(deleted_at__isnull=True)
+    if org:
+        qs = qs.filter(organization=org)
+    return qs
+
+
 # -- Notification dispatchers ------------------------------------------------
 
 def _laporan_recipients(inspection, actor):
@@ -118,6 +127,52 @@ def _emit_asset_notification(asset, actor, verb):
     rows = [Notification(recipient=r, actor=actor, verb=verb, asset=asset) for r in qs]
     if rows:
         Notification.objects.bulk_create(rows)
+
+
+def _emit_hard_fail_notification(inspection, actor):
+    """
+    Alert the asset's org managers/technicians when an inspection records a hard-fail
+    (functional failure) status for any component — the same statuses that zero the
+    component AHI (cfg.HARD_FAIL_STATUSES). One notification per failed component per
+    recipient; the actor who filed the inspection is excluded.
+    """
+    from fuzzy_engine import fuzzy_config as cfg
+
+    asset = inspection.asset
+    status_by_type = {
+        'AT': inspection.status_air_terminal,
+        'DC': inspection.status_down_conductor,
+        'GR': inspection.status_grounding,
+    }
+    failed_types = [
+        ct for ct, st in status_by_type.items()
+        if st in cfg.HARD_FAIL_STATUSES.get(ct, set())
+    ]
+    if not failed_types:
+        return
+
+    qs = User.objects.filter(is_active=True, role__in=['Manajer', 'Teknisi'])
+    if asset.organization_id:
+        qs = qs.filter(organization=asset.organization)
+    if actor:
+        qs = qs.exclude(pk=actor.pk)
+    recipients = list(qs)
+    if not recipients:
+        return
+
+    components = {
+        c.component_type: c
+        for c in asset.components.filter(
+            component_type__in=failed_types, end_date__isnull=True, deleted_at__isnull=True,
+        )
+    }
+    rows = [
+        Notification(recipient=r, actor=actor, verb='component_hard_fail',
+                     asset=asset, component=components.get(ct), inspection=inspection)
+        for ct in failed_types
+        for r in recipients
+    ]
+    Notification.objects.bulk_create(rows)
 
 
 class OrganizationViewSet(viewsets.ReadOnlyModelViewSet):
@@ -226,15 +281,22 @@ class AssetViewSet(viewsets.ModelViewSet):
         org = _user_org(request)
         base_qs = AssetRegistry.objects.filter(organization=org) if org else AssetRegistry.objects.all()
         instance = get_object_or_404(base_qs, pk=pk, deleted_at__isnull=False)
-        with transaction.atomic():
-            instance.deleted_at = None
-            instance.deleted_by = None
-            instance.save(update_fields=['deleted_at', 'deleted_by'])
-            AssetAudit.objects.create(
-                asset=instance, actor=request.user, action='restore',
-                note='Aset dipulihkan dari Tempat Sampah',
+        try:
+            with transaction.atomic():
+                instance.deleted_at = None
+                instance.deleted_by = None
+                instance.save(update_fields=['deleted_at', 'deleted_by'])
+                AssetAudit.objects.create(
+                    asset=instance, actor=request.user, action='restore',
+                    note='Aset dipulihkan dari Tempat Sampah',
+                )
+                _emit_asset_notification(instance, request.user, 'asset_restore')
+        except IntegrityError:
+            return Response(
+                {'detail': f'Aset dengan nama "{instance.nama_gedung}" sudah aktif di organisasi ini. '
+                           'Hapus atau ganti nama aset aktif tersebut sebelum memulihkan.'},
+                status=status.HTTP_409_CONFLICT,
             )
-            _emit_asset_notification(instance, request.user, 'asset_restore')
         return Response(AssetRegistrySerializer(instance).data)
 
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsManagerForUsers])
@@ -500,6 +562,7 @@ class InspectionViewSet(viewsets.ModelViewSet):
             health_after = asset.skor_kesehatan_aset
 
         InspectionLog.objects.filter(pk=updated.pk).update(health_after=health_after)
+        _emit_hard_fail_notification(updated, request.user)
 
         data = InspectionLogSerializer(updated).data
         data['health_before'] = health_before
@@ -566,6 +629,7 @@ class InspectionViewSet(viewsets.ModelViewSet):
             health_after = health_before
 
         InspectionLog.objects.filter(pk=inspection.pk).update(health_after=health_after)
+        _emit_hard_fail_notification(inspection, actor)
         return inspection, health_before, health_after
 
     def create(self, request, *args, **kwargs):
@@ -835,6 +899,8 @@ class InspectionViewSet(viewsets.ModelViewSet):
             logger.exception('update_asset_health failed after amending inspection %s', amendment.pk)
             health_after = health_before
 
+        _emit_hard_fail_notification(amendment, request.user)
+
         data = InspectionLogSerializer(amendment).data
         data['health_before'] = health_before
         data['health_after'] = health_after
@@ -940,10 +1006,9 @@ class DashboardSummaryView(APIView):
 
         now = timezone.now()
         seven_days_ago = now - timedelta(days=7)
-        org = _user_org(request)
-        assets_qs = AssetRegistry.objects.filter(organization=org) if org else AssetRegistry.objects.all()
-        events_qs = LightningEvent.objects.filter(asset__organization=org) if org else LightningEvent.objects.all()
-        inspections_qs = InspectionLog.objects.filter(asset__organization=org) if org else InspectionLog.objects.all()
+        assets_qs = _visible_assets(request)
+        events_qs = LightningEvent.objects.filter(asset__in=assets_qs)
+        inspections_qs = InspectionLog.objects.filter(asset__in=assets_qs)
 
         # Refresh any assets whose AHI snapshot is older than the TTL so the SQL
         # ordering/thresholds below reflect current age-based decay.
@@ -993,8 +1058,7 @@ class DashboardMapView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        org = _user_org(request)
-        assets = AssetRegistry.objects.filter(organization=org) if org else AssetRegistry.objects.all()
+        assets = _visible_assets(request)
         serializer = AssetMapSerializer(assets, many=True)
         return Response(serializer.data)
 

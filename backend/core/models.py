@@ -209,6 +209,13 @@ class AssetRegistry(models.Model):
     class Meta:
         db_table = 'asset_registry'
         ordering = ['-updated_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['organization', 'nama_gedung'],
+                condition=models.Q(deleted_at__isnull=True),
+                name='uniq_live_asset_name_per_org',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.nama_gedung} (LPL {self.lpl_grade})"
@@ -464,6 +471,7 @@ NOTIFICATION_VERBS = [
     ('asset_restore',       'Asset Restored'),
     ('component_eol_warning', 'Komponen mendekati masa pakai'),
     ('component_eol_urgent',  'Komponen hampir habis masa pakai'),
+    ('component_hard_fail',   'Komponen gagal kritis'),
 ]
 
 

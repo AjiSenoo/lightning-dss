@@ -144,3 +144,37 @@ class ComponentEolNotificationTests(_Base):
         self._set_age('AT', 0.10)   # 10% consumed -> below warning
         self._run()
         self.assertEqual(Notification.objects.filter(verb__startswith='component_eol').count(), 0)
+
+
+class HardFailNotificationTests(_Base):
+    def _inspection(self, **status):
+        from core.models import InspectionLog
+        base = {'status_air_terminal': 'OK', 'status_down_conductor': 'OK',
+                'status_grounding': 'OK'}
+        base.update(status)
+        return InspectionLog.objects.create(
+            asset=self.asset, tgl_inspeksi=timezone.now(), **base,
+        )
+
+    def test_hard_fail_notifies_manager_excludes_actor(self):
+        from core.views import _emit_hard_fail_notification
+        insp = self._inspection(status_down_conductor='Putus')
+        _emit_hard_fail_notification(insp, actor=self.teknisi)
+
+        notifs = Notification.objects.filter(verb='component_hard_fail')
+        # Manager notified; actor (teknisi) excluded.
+        self.assertEqual(notifs.count(), 1)
+        self.assertEqual(notifs.first().recipient, self.manager)
+        self.assertEqual(notifs.first().asset, self.asset)
+
+    def test_all_ok_emits_nothing(self):
+        from core.views import _emit_hard_fail_notification
+        insp = self._inspection()
+        _emit_hard_fail_notification(insp, actor=self.teknisi)
+        self.assertEqual(Notification.objects.filter(verb='component_hard_fail').count(), 0)
+
+    def test_non_hardfail_status_emits_nothing(self):
+        from core.views import _emit_hard_fail_notification
+        insp = self._inspection(status_grounding='Terkorosi')
+        _emit_hard_fail_notification(insp, actor=self.teknisi)
+        self.assertEqual(Notification.objects.filter(verb='component_hard_fail').count(), 0)

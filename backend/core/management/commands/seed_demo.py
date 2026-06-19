@@ -161,11 +161,10 @@ class Command(BaseCommand):
         for asset_data in ASSETS_ORG_A:
             asset, created = AssetRegistry.objects.get_or_create(
                 nama_gedung=asset_data['nama_gedung'],
-                defaults={**asset_data, 'organization': org_a},
+                organization=org_a,
+                deleted_at__isnull=True,
+                defaults=asset_data,
             )
-            if not created and asset.organization_id != org_a.pk:
-                asset.organization = org_a
-                asset.save()
             if created:
                 AssetAudit.objects.create(
                     asset=asset, actor=manager, action='create',
@@ -178,11 +177,10 @@ class Command(BaseCommand):
         for asset_data in ASSETS_ORG_B:
             asset, created = AssetRegistry.objects.get_or_create(
                 nama_gedung=asset_data['nama_gedung'],
-                defaults={**asset_data, 'organization': org_b},
+                organization=org_b,
+                deleted_at__isnull=True,
+                defaults=asset_data,
             )
-            if not created and asset.organization_id != org_b.pk:
-                asset.organization = org_b
-                asset.save()
             if created:
                 AssetAudit.objects.create(
                     asset=asset, actor=manager2, action='create',
@@ -509,8 +507,8 @@ class Command(BaseCommand):
             )
             stress = max(1.0 - total / cfg.REFERENCE_DAMAGE_THRESHOLD, 0.0)
 
-            penalty = cfg.COMPONENT_PENALTY.get(statuses.get(c.component_type, 'OK'), 0.0)
-            physical = max(1.0 - penalty, 0.0)
+            status = statuses.get(c.component_type, 'OK')
+            physical = cfg.CONDITION_FACTOR.get(status, 1.0)
 
             years = (as_of.date() - c.install_date).days / 365.25
             lifespan = cfg.DESIGN_LIFESPAN_BY_COMPONENT[c.component_type]
@@ -522,11 +520,16 @@ class Command(BaseCommand):
             ):
                 age = max(age - cfg.CORROSION_PENALTY, 0.0)
 
-            ahi_values.append(
+            ahi = (
                 cfg.W_CUMULATIVE_STRESS * stress
                 + cfg.W_PHYSICAL_CONDITION * physical
                 + cfg.W_CALENDAR_AGE * age
             )
+            # Weakest-link override mirrors calculate_component_ahi(): a hard-fail status
+            # zeroes the component AHI.
+            if status in cfg.HARD_FAIL_STATUSES.get(c.component_type, set()):
+                ahi = 0.0
+            ahi_values.append(ahi)
 
         return round(min(ahi_values), 4)
 
