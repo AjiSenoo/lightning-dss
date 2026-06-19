@@ -317,7 +317,9 @@ class Command(BaseCommand):
             tgl_inspeksi=now - timedelta(days=10),
             status_air_terminal='Rusak', status_down_conductor='OK',
             status_grounding='Terkorosi', resistansi_grounding_ohm=22.0,
-            catatan_teknisi='[DEMO] Air terminal rusak dan grounding terkorosi. Perlu perbaikan segera.',
+            status_spd='Degraded', arus_bocor_spd_ma=0.85,
+            status_bonding='Longgar',
+            catatan_teknisi='[DEMO] Air terminal rusak, grounding terkorosi, SPD terdegradasi, bonding longgar. Perlu perbaikan segera.',
             updated_by=teknisi,
         )
         InspectionLog.objects.filter(pk=log3_orig.pk).update(created_at=now - timedelta(days=10))

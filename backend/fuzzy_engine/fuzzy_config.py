@@ -94,21 +94,33 @@ LPL_DESIGN_CAPACITY = {
 #   AT : d ∝ I   (proxy for Q_long; linear)
 #   DC : d ∝ I²  (W/R ∝ I²; quadratic — same current causes disproportionate DC wear)
 #   GR : d ∝ I   (soil ionisation onset; linear)
+#   BND: d ∝ I   (joint ohmic/mechanical wear; linear in impulse current per IEC 62305-3 Cl.5)
+#   SPD: d ∝ I²  (MOV absorbed energy ∝ I²·t; IEC 61643-12 Cl.8 — quadratic)
+#   EQP: excluded (sink node; no lightning-current damage modeled)
 DAMAGE_EXPONENT = {
     'AT': 1.0,
     'DC': 2.0,
     'GR': 1.0,
+    'BND': 1.0,
+    'SPD': 2.0,
 }
 
 # Aggregation weights for "Overall Health" (AHI_overall) trending number.
-# GR carries the largest weight: most-frequent failure mode in Indonesian tropical soils
-# and governs step/touch-voltage safety (IEC 62305-2 loss type R1).
-# Source: engineering estimate anchored on SNI 03-7015-2004 inspection priorities
-# and CIGRE TB 858 "choose to suit the application" guidance.
+# Weights must sum to 1.0 across the five degrading components (EQP excluded: weight 0).
+# External LPS (AT+DC+GR = 0.72) stays dominant as the primary current-conduction path;
+# GR heaviest (0.28) — most-frequent failure in Indonesian tropical soils (IEC 62305-2 R1).
+# SPD (0.16) weighted above BND (0.12): sacrificial MOV ages faster than bonding conductors.
+# Source: engineering estimate anchored on SNI 03-7015-2004 inspection priorities,
+# IEC 61643-12 SPD aging guidance, and CIGRE TB 858 "choose to suit the application".
+# Flag for thesis: weights are engineering estimates — AHP formalisation is recommended
+# future work (as already noted in Bab VII Saran).
 COMPONENT_WEIGHTS = {
-    'AT': float(os.getenv('W_COMPONENT_AT', '0.30')),
-    'DC': float(os.getenv('W_COMPONENT_DC', '0.30')),
-    'GR': float(os.getenv('W_COMPONENT_GR', '0.40')),
+    'AT':  float(os.getenv('W_COMPONENT_AT',  '0.22')),
+    'DC':  float(os.getenv('W_COMPONENT_DC',  '0.22')),
+    'GR':  float(os.getenv('W_COMPONENT_GR',  '0.28')),
+    'BND': float(os.getenv('W_COMPONENT_BND', '0.12')),
+    'SPD': float(os.getenv('W_COMPONENT_SPD', '0.16')),
+    'EQP': 0.0,  # sink node — excluded from overall health
 }
 
 # Design lifespan per component type (years since install/last replacement),
@@ -117,41 +129,59 @@ COMPONENT_WEIGHTS = {
 #       (National Bureau of Standards 45-yr study, cited in Rempe 2003);
 #   AT 25 yr (comparable to asset-level lifespan assumption);
 #   DC 30 yr (bare Cu/Al conductors are robust; failures are mainly mechanical).
-# Tropical Indonesia profile derates ~25% (AT 20 / DC 25 / GR 33) for higher
-# flash density (Hidayat & Ishii 1998) and acidic-laterite corrosion
-# (NBS Circular 579). Default stays 'temperate' for backward compatibility;
-# per-component LIFESPAN_* env vars still override the selected profile.
+#   BND 30 yr (copper bonding conductors per IEC 62305-3 Annex E; similar to DC).
+#   SPD 10 yr (sacrificial MOV device; manufacturer guidance + IEC 61643-12 Cl.9.2;
+#              tropical derating to 8 yr for higher flash density and humidity-accelerated
+#              metal oxide degradation).
+# Tropical Indonesia profile derates ~25% for higher flash density (Hidayat & Ishii 1998)
+# and acidic-laterite corrosion (NBS Circular 579). Default stays 'temperate' for backward
+# compatibility; per-component LIFESPAN_* env vars still override the selected profile.
+# EQP excluded — no lifespan modeled (sink node).
 SITE_CLIMATE_PROFILE = os.getenv('SITE_CLIMATE_PROFILE', 'temperate').lower()
 _LIFESPAN_PROFILES = {
-    'temperate': {'AT': 25, 'DC': 30, 'GR': 40},
-    'tropical':  {'AT': 20, 'DC': 25, 'GR': 33},
+    'temperate': {'AT': 25, 'DC': 30, 'GR': 40, 'BND': 30, 'SPD': 10},
+    'tropical':  {'AT': 20, 'DC': 25, 'GR': 33, 'BND': 25, 'SPD': 8},
 }
 _lifespan_base = _LIFESPAN_PROFILES.get(SITE_CLIMATE_PROFILE, _LIFESPAN_PROFILES['temperate'])
 DESIGN_LIFESPAN_BY_COMPONENT = {
-    'AT': int(os.getenv('LIFESPAN_AT', str(_lifespan_base['AT']))),
-    'DC': int(os.getenv('LIFESPAN_DC', str(_lifespan_base['DC']))),
-    'GR': int(os.getenv('LIFESPAN_GR', str(_lifespan_base['GR']))),
+    'AT':  int(os.getenv('LIFESPAN_AT',  str(_lifespan_base['AT']))),
+    'DC':  int(os.getenv('LIFESPAN_DC',  str(_lifespan_base['DC']))),
+    'GR':  int(os.getenv('LIFESPAN_GR',  str(_lifespan_base['GR']))),
+    'BND': int(os.getenv('LIFESPAN_BND', str(_lifespan_base['BND']))),
+    'SPD': int(os.getenv('LIFESPAN_SPD', str(_lifespan_base['SPD']))),
 }
 
 # Hard-fail status values: a confirmed functional failure of the component.
 # Single source of truth for three behaviours: (1) zero the component AHI
 # (weakest-link override, see CONDITION_FACTOR below), (2) emit an immediate-replace
 # recommendation, and (3) fire a `component_hard_fail` notification.
-# Rationale: the external LPS is a functional series chain AT -> DC -> GR
-# (IEC 62305-3:2010 Sec.5); any broken link destroys the protection function, so the
-# observed-failure statuses below are replacement triggers per IEC 62305-3 Clause 7.
+# Rationale: the full LPS is a functional series chain AT -> DC -> GR -> BND -> SPD -> EQP
+# (IEC 62305-3:2010 Sec.5 external + IEC 62305-4 internal LPS); any broken link destroys
+# the protection function, so the observed-failure statuses below are replacement triggers
+# per IEC 62305-3 Clause 7 / IEC 62305-4 Cl.5.
 # 'High_Resistance' is included for GR because >5 ohm violates SNI 03-7015:2004 Sec.6.5.7 /
 # PUIL 2011 even when no numeric reading is supplied (numeric path:
 # GR_RESISTANCE_REPLACE_THRESHOLD_OHM).
+# 'Terputus' for BND: open bonding conductor per IEC 62305-3 Cl.5.4 failure criterion.
+# 'Failed' for SPD: MOV device destroyed; no protective function (IEC 61643-11 Cl.7).
 HARD_FAIL_STATUSES = {
-    'AT': {'Meleleh', 'Rusak'},
-    'DC': {'Putus'},
-    'GR': {'High_Resistance'},
+    'AT':  {'Meleleh', 'Rusak'},
+    'DC':  {'Putus'},
+    'GR':  {'High_Resistance'},
+    'BND': {'Terputus'},
+    'SPD': {'Failed'},
 }
 
 # SNI 03-7015-2004 §6.5.7 and PUIL 2011 require grounding resistance <= 5 ohm for
 # lightning-protection installations in Indonesia; above this, replacement is required.
 GR_RESISTANCE_REPLACE_THRESHOLD_OHM = float(os.getenv('GR_RESISTANCE_THRESHOLD', '5.0'))
+
+# SPD leakage current threshold: rising resistive leakage current (I_L) is the standard
+# MOV end-of-life indicator per IEC 61643-12 Cl.8.2 and manufacturer guidance.
+# IEC 61643-11 Cl.7.7 marks a device for replacement when I_L exceeds the manufacturer
+# reference; 1.0 mA is a widely-cited conservative field limit (engineering estimate —
+# verify against installed device datasheet).
+SPD_LEAKAGE_REPLACE_THRESHOLD_MA = float(os.getenv('SPD_LEAKAGE_THRESHOLD_MA', '1.0'))
 
 # ---------------------------------------------------------------
 # Tropical Soil Corrosion Penalty
@@ -191,9 +221,13 @@ CONDITION_FACTOR = {
     'Terkorosi': 0.75,
     'Klem_Lepas': 0.50,
     'Bengkok': 0.50,
+    'Longgar': 0.50,    # BND loose joint — IEC 62305-3 Cl.5.4 "loose connection" finding
+    'Degraded': 0.50,   # SPD partial MOV wear — IEC 61643-11 Cl.7 "degraded but functional"
     'Rusak': 0.00,
     'Meleleh': 0.00,
     'Putus': 0.00,
+    'Terputus': 0.00,   # BND open circuit — hard-fail, same ladder position as Putus
+    'Failed': 0.00,     # SPD destroyed — hard-fail per IEC 61643-11 Cl.7
     'High_Resistance': 0.00,
 }
 
@@ -219,6 +253,10 @@ SEVERITY_MAP = {
     'Bengkok': 0.25,
     'Putus': 0.4,
     'High_Resistance': 0.2,
+    'Longgar': 0.15,    # BND loose — same severity tier as Klem_Lepas
+    'Terputus': 0.4,    # BND open — same tier as Putus
+    'Degraded': 0.2,    # SPD partial wear
+    'Failed': 0.4,      # SPD destroyed
 }
 
 # ---------------------------------------------------------------

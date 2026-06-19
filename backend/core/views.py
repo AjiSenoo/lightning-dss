@@ -140,9 +140,11 @@ def _emit_hard_fail_notification(inspection, actor):
 
     asset = inspection.asset
     status_by_type = {
-        'AT': inspection.status_air_terminal,
-        'DC': inspection.status_down_conductor,
-        'GR': inspection.status_grounding,
+        'AT':  inspection.status_air_terminal,
+        'DC':  inspection.status_down_conductor,
+        'GR':  inspection.status_grounding,
+        'BND': inspection.status_bonding,
+        'SPD': inspection.status_spd,
     }
     failed_types = [
         ct for ct, st in status_by_type.items()

@@ -184,22 +184,27 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
             latest_event = obj.events.first()
             r_stress = latest_event.rasio_stres if latest_event else 0.0
             fuzzy = run_inference_per_component(r_stress, ahi_by_type)
-            # Build latest GR resistance measurement
-            latest_gr_status = None
-            gr_component = obj.components.filter(
-                component_type='GR', end_date__isnull=True, deleted_at__isnull=True
-            ).first()
-            if gr_component:
-                latest_gr_status = (
-                    gr_component.status_history
+            # Build latest per-component numeric measurements for threshold rules
+            def _latest_measurement(component_type):
+                comp = obj.components.filter(
+                    component_type=component_type, end_date__isnull=True, deleted_at__isnull=True
+                ).first()
+                if comp is None:
+                    return None
+                return (
+                    comp.status_history
                     .order_by('-inspection__tgl_inspeksi')
                     .values_list('measurement', flat=True)
                     .first()
                 )
+
             return recommend_for_asset(
                 per_ahi,
                 fuzzy['per_component'],
-                latest_measurements={'GR': latest_gr_status},
+                latest_measurements={
+                    'GR':  _latest_measurement('GR'),   # resistance Ω
+                    'SPD': _latest_measurement('SPD'),  # leakage mA
+                },
             )
         except Exception:
             logger.exception('recommendations failed for asset %s', obj.pk)

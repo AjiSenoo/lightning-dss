@@ -74,6 +74,16 @@ def recommend_for_component(
                 'physical', f'{component_type}_HIGH_RESISTANCE',
             )
 
+    # For SPD, rising resistive leakage current beyond the threshold is an end-of-life
+    # indicator (IEC 61643-11 Cl.7.7 / IEC 61643-12 Cl.8.2), even if the qualitative
+    # status is still 'Degraded' rather than 'Failed'.
+    if component_type == 'SPD' and latest_measurement is not None:
+        if latest_measurement > cfg.SPD_LEAKAGE_REPLACE_THRESHOLD_MA:
+            return _recommendation(
+                component_type, 'replace', 'immediate', urgency_label,
+                'physical', f'{component_type}_HIGH_LEAKAGE',
+            )
+
     # --- Rule 2: branch on fuzzy urgency ---
     if urgency_label == 'Inspeksi Darurat':
         if driver == 'physical':

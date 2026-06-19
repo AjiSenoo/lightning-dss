@@ -472,7 +472,7 @@ export default function LaporanDetail() {
         </div>
 
         <div>
-          <p className="text-xs text-gray-400 mb-2">Komponen Wajib</p>
+          <p className="text-xs text-gray-400 mb-2">LPS Eksternal</p>
           <div className="flex flex-wrap gap-2">
             <StatusChip label="Air Terminal" value={log?.status_air_terminal} />
             <StatusChip label="Down Conductor" value={log?.status_down_conductor} />
@@ -485,7 +485,7 @@ export default function LaporanDetail() {
 
         {(log?.status_spd || log?.status_bonding || log?.status_kabel_instalasi) && (
           <div>
-            <p className="text-xs text-gray-400 mb-2">Komponen Tambahan</p>
+            <p className="text-xs text-gray-400 mb-2">LPS Internal</p>
             <div className="flex flex-wrap gap-2">
               {log.status_spd && <StatusChip label="SPD" value={log.status_spd} />}
               {log.status_bonding && <StatusChip label="Bonding" value={log.status_bonding} />}

@@ -80,17 +80,23 @@ ROLE_CHOICES = [
 
 
 COMPONENT_TYPE_CHOICES = [
-    ('AT', 'Air Terminal'),
-    ('DC', 'Down Conductor'),
-    ('GR', 'Grounding Electrode'),
+    ('AT',  'Air Terminal'),
+    ('DC',  'Down Conductor'),
+    ('GR',  'Grounding Electrode'),
+    ('BND', 'Equipotential Bonding'),
+    ('SPD', 'Surge Protective Device'),
+    ('EQP', 'Protected Equipment'),
 ]
 
 # Per-component-type allowed status values; mirrors the flat-field choices above
 # so backfill from InspectionLog round-trips losslessly.
+# EQP has no inspection-status taxonomy (sink node) — omitted.
 COMPONENT_STATUS_CHOICES_BY_TYPE = {
-    'AT': AIR_TERMINAL_STATUS,
-    'DC': DOWN_CONDUCTOR_STATUS,
-    'GR': GROUNDING_STATUS,
+    'AT':  AIR_TERMINAL_STATUS,
+    'DC':  DOWN_CONDUCTOR_STATUS,
+    'GR':  GROUNDING_STATUS,
+    'BND': BONDING_STATUS,
+    'SPD': SPD_STATUS,
 }
 
 MAINTENANCE_ACTION_CHOICES = [
@@ -144,7 +150,7 @@ class AssetRegistry(models.Model):
         # Prefer the precise install date; fall back to Jan 1 of the install year for
         # legacy/year-only registrations where the exact day is unknown.
         install_date = self.tanggal_instalasi or datetime.date(self.tahun_instalasi, 1, 1)
-        for ct in ('AT', 'DC', 'GR'):
+        for ct in ('AT', 'DC', 'GR', 'BND', 'SPD', 'EQP'):
             exists = self.components.filter(
                 component_type=ct, end_date__isnull=True, deleted_at__isnull=True
             ).exists()
@@ -345,13 +351,14 @@ class InspectionLog(models.Model):
             self._sync_component_statuses()
 
     # Mirror flat status_* fields into InspectionComponentStatus rows so the AHI engine
-    # (post-Phase 2) can read from the per-component table consistently. Idempotent via
-    # update_or_create. Removed when the frontend stops writing the flat fields.
+    # can read from the per-component table consistently. Idempotent via update_or_create.
     def _sync_component_statuses(self):
         field_map = {
-            'AT': ('status_air_terminal', None),
-            'DC': ('status_down_conductor', None),
-            'GR': ('status_grounding', 'resistansi_grounding_ohm'),
+            'AT':  ('status_air_terminal',   None),
+            'DC':  ('status_down_conductor',  None),
+            'GR':  ('status_grounding',       'resistansi_grounding_ohm'),
+            'BND': ('status_bonding',         None),
+            'SPD': ('status_spd',             'arus_bocor_spd_ma'),
         }
         active_components = {
             c.component_type: c
@@ -504,7 +511,7 @@ class AssetComponent(models.Model):
     """
     component_id        = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     asset               = models.ForeignKey(AssetRegistry, on_delete=models.PROTECT, related_name='components')
-    component_type      = models.CharField(max_length=2, choices=COMPONENT_TYPE_CHOICES)
+    component_type      = models.CharField(max_length=3, choices=COMPONENT_TYPE_CHOICES)
     install_date        = models.DateField(help_text="Resets the stress and age clock on replacement")
     end_date            = models.DateField(null=True, blank=True, db_index=True,
                                            help_text="Set when superseded; null = currently installed")

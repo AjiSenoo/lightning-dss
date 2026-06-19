@@ -6,9 +6,11 @@ import cacheStore from '../offline/cacheStore'
 import client from '../api/client'
 
 const NON_OK = {
-  status_air_terminal: (v) => v !== 'OK',
+  status_air_terminal:   (v) => v !== 'OK',
   status_down_conductor: (v) => v !== 'OK',
-  status_grounding: (v) => v !== 'OK',
+  status_grounding:      (v) => v !== 'OK',
+  status_bonding:        (v) => v !== '' && v !== 'OK',
+  status_spd:            (v) => v !== '' && v !== 'OK',
 }
 
 function AHIChip({ ahi }) {
@@ -398,7 +400,7 @@ export default function LogbookForm() {
             className="flex items-center gap-2 font-semibold text-gray-700 w-full text-left"
             onClick={() => setShowOptional((v) => !v)}
           >
-            Komponen Tambahan {showOptional ? '▲' : '▼'}
+            Komponen LPS Internal — SPD & Bonding {showOptional ? '▲' : '▼'}
           </button>
           {showOptional && (
             <div className="space-y-4 pt-2 border-t">

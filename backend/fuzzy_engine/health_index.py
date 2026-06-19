@@ -76,6 +76,18 @@ def calculate_component_ahi(component, asset) -> dict:
     Returns dict:
         ahi, sub_scores {stress, physical, age}, corrosion_applied
     """
+    # EQP is the terminal sink node — no lightning-current damage model applies.
+    # Fixed AHI 1.0, weight 0: it anchors the chain's "real end" without distorting
+    # safety (min) or overall (weighted sum) aggregation.
+    if component.component_type == 'EQP':
+        return {
+            'ahi': 1.0,
+            'sub_scores': {'stress': 1.0, 'physical': 1.0, 'age': 1.0},
+            'corrosion_applied': False,
+            'hard_failed': False,
+            'latest_status': None,
+        }
+
     # Only count strikes after this component was installed (resets on replacement)
     events_since_install = asset.events.filter(
         timestamp__date__gte=component.install_date
