@@ -133,12 +133,20 @@ DESIGN_LIFESPAN_BY_COMPONENT = {
     'GR': int(os.getenv('LIFESPAN_GR', str(_lifespan_base['GR']))),
 }
 
-# Hard-fail status values that trigger immediate-replace regardless of fuzzy urgency.
-# GR uses a resistance measurement threshold instead (see GR_RESISTANCE_REPLACE_THRESHOLD_OHM).
+# Hard-fail status values: a confirmed functional failure of the component.
+# Single source of truth for three behaviours: (1) zero the component AHI
+# (weakest-link override, see CONDITION_FACTOR below), (2) emit an immediate-replace
+# recommendation, and (3) fire a `component_hard_fail` notification.
+# Rationale: the external LPS is a functional series chain AT -> DC -> GR
+# (IEC 62305-3:2010 Sec.5); any broken link destroys the protection function, so the
+# observed-failure statuses below are replacement triggers per IEC 62305-3 Clause 7.
+# 'High_Resistance' is included for GR because >5 ohm violates SNI 03-7015:2004 Sec.6.5.7 /
+# PUIL 2011 even when no numeric reading is supplied (numeric path:
+# GR_RESISTANCE_REPLACE_THRESHOLD_OHM).
 HARD_FAIL_STATUSES = {
     'AT': {'Meleleh', 'Rusak'},
     'DC': {'Putus'},
-    'GR': set(),
+    'GR': {'High_Resistance'},
 }
 
 # SNI 03-7015-2004 §6.5.7 and PUIL 2011 require grounding resistance <= 5 ohm for
@@ -153,18 +161,40 @@ SOIL_RESISTIVITY_THRESHOLD = 10   # Ω·m
 CORROSION_PENALTY = 0.05
 
 # ---------------------------------------------------------------
-# Component Damage Penalties (for Physical Condition sub-score)
+# Physical Condition Factor (CF) — the physical sub-score itself.
+#
+# CF is taken from the discrete condition-criteria scoring of the established Health
+# Index methodology: A.N. Jahromi, R. Piercy, S. Cress, J.R.R. Service & W. Fan,
+# "An Approach to Power Transformer Asset Management Using Health Index," IEEE
+# Electrical Insulation Magazine 25(2):20-34, 2009 — each observed condition parameter
+# is scored on a 0-4 ladder (4 = as-new ... 0 = failed) combined by weighted sum.
+# Normalised to [0,1] this is the standard {1.00, 0.75, 0.50, 0.25, 0.00} ladder.
+#
+# The scoring *scale* is asset-agnostic (Jahromi 2009); the per-status grade
+# *assignment* is anchored to the LPS maintenance/inspection criteria of
+# IEC 62305-3:2010 Clause 7:
+#   OK          -> 4 (1.00)  as-new
+#   Terkorosi   -> 3 (0.75)  surface corrosion; cross-section still >= IEC 62305-3
+#                            Table 6 minimum (ASTM G57 gradual corrosivity band)
+#   Klem_Lepas  -> 2 (0.50)  IEC 62305-3 Cl.7 "loose connections" finding; repairable
+#   Bengkok     -> 2 (0.50)  mechanical deformation, no cross-section loss yet
+#   Rusak /     -> 0 (0.00)  IEC 62305-3 Cl.7 replacement triggers ("cross-section
+#   Meleleh /                reduced below minimum" / "deformation by lightning");
+#   Putus /                  Putus = open series chain; High_Resistance = >5 ohm
+#   High_Resistance          (SNI 03-7015:2004 Cl.6.5.7 / PUIL 2011). These are also
+#                            HARD_FAIL_STATUSES, so the component AHI is zeroed outright
+#                            (weakest-link override) rather than merely down-weighted.
 # ---------------------------------------------------------------
 
-COMPONENT_PENALTY = {
-    'OK': 0.0,
-    'Rusak': 0.15,
-    'Meleleh': 0.20,
-    'Terkorosi': 0.10,
-    'Klem_Lepas': 0.15,
-    'Bengkok': 0.20,
-    'Putus': 0.30,
-    'High_Resistance': 0.20,
+CONDITION_FACTOR = {
+    'OK': 1.00,
+    'Terkorosi': 0.75,
+    'Klem_Lepas': 0.50,
+    'Bengkok': 0.50,
+    'Rusak': 0.00,
+    'Meleleh': 0.00,
+    'Putus': 0.00,
+    'High_Resistance': 0.00,
 }
 
 # ---------------------------------------------------------------

@@ -47,10 +47,15 @@ def _stress_score(component_type: str, lpl_class: str, events_since_install) -> 
 
 
 def _physical_score(latest_status) -> float:
-    """Penalty from the latest inspection status for this component."""
+    """
+    Condition factor (CF) from the latest inspection status for this component.
+
+    CF is the physical sub-score directly (normalised Jahromi et al. 2009 condition
+    ladder; see cfg.CONDITION_FACTOR). An unknown/unset status defaults to as-new (1.0).
+    """
     if latest_status is None:
         return 1.0
-    return max(1.0 - cfg.COMPONENT_PENALTY.get(latest_status.status, 0.0), 0.0)
+    return cfg.CONDITION_FACTOR.get(latest_status.status, 1.0)
 
 
 def _age_score(install_date: datetime.date, component_type: str) -> float:
@@ -115,6 +120,16 @@ def calculate_component_ahi(component, asset) -> dict:
         + cfg.W_CALENDAR_AGE * age
     )
 
+    # Weakest-link override: a confirmed functional failure (hard-fail status) means the
+    # component cannot perform its protective role, so its AHI collapses to 0 regardless of
+    # how favourable the stress/age proxies look. The LPS is a functional series chain
+    # AT -> DC -> GR (IEC 62305-3:2010 Sec.5); a broken link destroys the protection
+    # function (reinforced by Birnbaum reliability importance for series systems).
+    status_str = latest_status.status if latest_status is not None else None
+    hard_failed = status_str in cfg.HARD_FAIL_STATUSES.get(component.component_type, set())
+    if hard_failed:
+        ahi = 0.0
+
     return {
         'ahi': round(ahi, 4),
         'sub_scores': {
@@ -123,6 +138,8 @@ def calculate_component_ahi(component, asset) -> dict:
             'age':      round(age, 4),
         },
         'corrosion_applied': corrosion_applied,
+        'hard_failed':       hard_failed,
+        'latest_status':     status_str,
     }
 
 

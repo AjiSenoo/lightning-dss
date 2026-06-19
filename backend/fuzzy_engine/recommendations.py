@@ -55,10 +55,18 @@ def recommend_for_component(
     driver        = _primary_driver(sub_scores, corrosion)
 
     # --- Rule 1: hard-fail status overrides everything (immediate replace) ---
-    # Hard-fail statuses are detected upstream via InspectionComponentStatus.status;
-    # callers pass the latest status in fuzzy_result['label'] if they want this rule
-    # to fire — but the cleaner check is done here via the hard_fail set.
-    # For GR, check the resistance measurement threshold.
+    # The latest inspection status rides along in ahi_result (set by
+    # calculate_component_ahi). A confirmed functional failure is an immediate
+    # replacement trigger (IEC 62305-3:2010 Clause 7), independent of fuzzy urgency.
+    status = ahi_result.get('latest_status')
+    if status in cfg.HARD_FAIL_STATUSES.get(component_type, set()):
+        return _recommendation(
+            component_type, 'replace', 'immediate', urgency_label,
+            'physical', f'{component_type}_HARDFAIL_{status.upper()}',
+        )
+
+    # For GR, a numeric resistance reading above the SNI/PUIL 5 ohm limit is also a
+    # hard fail even if the qualitative status was not recorded.
     if component_type == 'GR' and latest_measurement is not None:
         if latest_measurement > cfg.GR_RESISTANCE_REPLACE_THRESHOLD_OHM:
             return _recommendation(

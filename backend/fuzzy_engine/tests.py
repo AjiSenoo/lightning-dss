@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from core.models import (
     Organization, AssetRegistry, AssetComponent,
-    InspectionLog, InspectionComponentStatus,
+    InspectionLog,
 )
 from fuzzy_engine.health_index import (
     per_event_damage, aggregate_asset_ahi, calculate_component_ahi,
@@ -202,6 +202,94 @@ class ReplacementResetsStressTest(TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Physical condition factor & hard-fail weakest-link override
+# ---------------------------------------------------------------------------
+
+def add_inspection_status(asset, component, status, when):
+    """
+    Create an InspectionLog whose flat status field for `component`'s type is `status`.
+    InspectionLog.save() mirrors the flat fields into InspectionComponentStatus rows, so
+    we set the flat field rather than creating the per-component row directly (avoids the
+    unique (inspection, component) collision).
+    """
+    field = {
+        'AT': 'status_air_terminal',
+        'DC': 'status_down_conductor',
+        'GR': 'status_grounding',
+    }[component.component_type]
+    flat = {'status_air_terminal': 'OK', 'status_down_conductor': 'OK', 'status_grounding': 'OK'}
+    flat[field] = status
+    return InspectionLog.objects.create(
+        asset=asset,
+        tgl_inspeksi=timezone.make_aware(datetime.datetime(when.year, when.month, when.day)),
+        **flat,
+    )
+
+
+class PhysicalConditionFactorTest(TestCase):
+
+    def setUp(self):
+        self.org = make_org()
+        # Recent install so age/stress are favourable — isolates the physical channel.
+        self.asset = make_asset(self.org, lpl='I', tahun=2024)
+
+    def test_condition_factors_match_literature_ladder(self):
+        # Jahromi 2009 normalised condition ladder: OK 1.0, Terkorosi 0.75, Klem_Lepas 0.50.
+        # One inspection sets all three flat fields so each component's latest status is
+        # unambiguous (separate same-dated inspections would overwrite each other's rows).
+        InspectionLog.objects.create(
+            asset=self.asset,
+            tgl_inspeksi=timezone.make_aware(datetime.datetime(2025, 1, 1)),
+            status_air_terminal='Terkorosi',
+            status_down_conductor='Klem_Lepas',
+            status_grounding='OK',
+        )
+        at = active_component(self.asset, 'AT')
+        dc = active_component(self.asset, 'DC')
+        gr = active_component(self.asset, 'GR')
+        self.assertAlmostEqual(
+            calculate_component_ahi(at, self.asset)['sub_scores']['physical'], 0.75, places=4)
+        self.assertAlmostEqual(
+            calculate_component_ahi(dc, self.asset)['sub_scores']['physical'], 0.50, places=4)
+        self.assertAlmostEqual(
+            calculate_component_ahi(gr, self.asset)['sub_scores']['physical'], 1.00, places=4)
+
+    def test_ok_status_is_full_health(self):
+        at = active_component(self.asset, 'AT')
+        add_inspection_status(self.asset, at, 'OK', datetime.date(2025, 1, 1))
+        res = calculate_component_ahi(at, self.asset)
+        self.assertAlmostEqual(res['sub_scores']['physical'], 1.0, places=4)
+        self.assertFalse(res['hard_failed'])
+
+    def test_hard_fail_zeroes_component_ahi(self):
+        # A severed DC collapses the component AHI to 0 even with pristine stress & age.
+        dc = active_component(self.asset, 'DC')
+        add_inspection_status(self.asset, dc, 'Putus', datetime.date(2025, 1, 1))
+        res = calculate_component_ahi(dc, self.asset)
+        self.assertEqual(res['ahi'], 0.0)
+        self.assertTrue(res['hard_failed'])
+
+    def test_hard_fail_drives_asset_safety_to_zero(self):
+        dc = active_component(self.asset, 'DC')
+        add_inspection_status(self.asset, dc, 'Putus', datetime.date(2025, 1, 1))
+        health = calculate_asset_health(self.asset)
+        self.assertEqual(health['ahi_safety'], 0.0)
+        self.assertEqual(health['worst_component'], 'DC')
+
+    def test_repair_clears_hard_fail(self):
+        from core.models import ComponentMaintenanceAction
+        dc = active_component(self.asset, 'DC')
+        add_inspection_status(self.asset, dc, 'Putus', datetime.date(2025, 1, 1))
+        ComponentMaintenanceAction.objects.create(
+            asset=self.asset, component=dc, action='repair',
+            performed_at=timezone.make_aware(datetime.datetime(2025, 2, 1)),
+        )
+        res = calculate_component_ahi(dc, self.asset)
+        self.assertFalse(res['hard_failed'])
+        self.assertGreater(res['ahi'], 0.0)
+
+
+# ---------------------------------------------------------------------------
 # Recommendation engine
 # ---------------------------------------------------------------------------
 
@@ -210,21 +298,33 @@ class RecommendationTest(TestCase):
     def _fuzzy(self, label):
         return {'label': label, 'score': 50.0, 'r_stress_input': 0.5, 'd_asset_input': 0.5}
 
-    def _ahi(self, sub_scores, corrosion=False):
+    def _ahi(self, sub_scores, corrosion=False, latest_status=None):
         ahi = 0.5 * sub_scores.get('stress', 1) + 0.3 * sub_scores.get('physical', 1) + 0.2 * sub_scores.get('age', 1)
-        return {'ahi': ahi, 'sub_scores': sub_scores, 'corrosion_applied': corrosion}
+        return {
+            'ahi': ahi, 'sub_scores': sub_scores,
+            'corrosion_applied': corrosion, 'latest_status': latest_status,
+        }
 
     def test_hard_fail_at_meleleh(self):
-        from fuzzy_engine import fuzzy_config as cfg
-        ahi = self._ahi({'stress': 0.8, 'physical': 0.3, 'age': 0.9})
-        # Simulate hard-fail via the urgency label (hard-fail is checked in calling code
-        # but recommendations.py checks GR measurement; AT hard-fail tested via Darurat+physical)
-        fuzzy = self._fuzzy('Inspeksi Darurat')
-        ahi_hard = self._ahi({'stress': 0.8, 'physical': 0.1, 'age': 0.9})  # physical dominates
-        rec = recommend_for_component('AT', ahi_hard, fuzzy)
-        self.assertEqual(rec['action'], 'repair')
-        self.assertEqual(rec['time_horizon'], 'within_1_month')
+        # A hard-fail status on AT yields immediate replace regardless of fuzzy urgency.
+        ahi = self._ahi({'stress': 0.8, 'physical': 0.0, 'age': 0.9}, latest_status='Meleleh')
+        rec = recommend_for_component('AT', ahi, self._fuzzy('Inspeksi Rutin'))
+        self.assertEqual(rec['action'], 'replace')
+        self.assertEqual(rec['time_horizon'], 'immediate')
         self.assertEqual(rec['primary_driver'], 'physical')
+
+    def test_hard_fail_dc_putus(self):
+        ahi = self._ahi({'stress': 1.0, 'physical': 0.0, 'age': 1.0}, latest_status='Putus')
+        rec = recommend_for_component('DC', ahi, self._fuzzy('Inspeksi Rutin'))
+        self.assertEqual(rec['action'], 'replace')
+        self.assertEqual(rec['time_horizon'], 'immediate')
+
+    def test_hard_fail_gr_high_resistance_status(self):
+        # Qualitative GR status (no numeric measurement) still hard-fails.
+        ahi = self._ahi({'stress': 0.9, 'physical': 0.0, 'age': 0.9}, latest_status='High_Resistance')
+        rec = recommend_for_component('GR', ahi, self._fuzzy('Inspeksi Rutin'))
+        self.assertEqual(rec['action'], 'replace')
+        self.assertEqual(rec['time_horizon'], 'immediate')
 
     def test_gr_high_resistance_immediate_replace(self):
         ahi = self._ahi({'stress': 0.9, 'physical': 0.9, 'age': 0.9})
