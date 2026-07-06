@@ -39,14 +39,18 @@ git clone -b dev https://github.com/AjiSenoo/lightning-dss.git
 cd lightning-dss
 cp .env.example .env
 ```
-Edit `.env` for plain-HTTP-on-IP mode (substitute the real VPS IP):
-- `SECRET_KEY` → `python3 -c "import secrets; print(secrets.token_urlsafe(64))"`
-- `POSTGRES_PASSWORD` → `python3 -c "import secrets; print(secrets.token_urlsafe(24))"`
-- `ALLOWED_HOSTS=<vps-ip>`
-- `CSRF_TRUSTED_ORIGINS=http://<vps-ip>:8080`
-- Keep `SECURE_SSL_REDIRECT=False`, `SESSION_COOKIE_SECURE=False`,
-  `CSRF_COOKIE_SECURE=False` (required for admin login over plain HTTP).
-- `HTTP_PORT=8080` (or another free port), `GUNICORN_WORKERS=1`, `TZ=Asia/Jakarta`.
+### `.env` can be filled in by Claude Code running on this VPS — no manual editing needed
+- `SECRET_KEY` / `POSTGRES_PASSWORD` — generate directly: `python3 -c "import secrets; print(secrets.token_urlsafe(64))"` (and `token_urlsafe(24)` for the DB password).
+- `ALLOWED_HOSTS` / `CSRF_TRUSTED_ORIGINS` — since you're running on the box itself,
+  learn its own public IP with `curl -4 ifconfig.me` and fill in
+  `ALLOWED_HOSTS=<ip>` and `CSRF_TRUSTED_ORIGINS=http://<ip>:8080`. Flag the detected
+  IP back to the user once before relying on it (wrong if the box sits behind
+  NAT/a load balancer).
+- `HTTP_PORT` — check for conflicts first (`ss -tlnp`); default to 8080 if free,
+  otherwise pick another free port and say which one was chosen.
+- Fixed values, no lookup needed: `GUNICORN_WORKERS=1`, `TZ=Asia/Jakarta`,
+  `POSTGRES_DB`/`POSTGRES_USER` defaults, and `SECURE_SSL_REDIRECT=False` /
+  `SESSION_COOKIE_SECURE=False` / `CSRF_COOKIE_SECURE=False` (plain-HTTP mode).
 
 ## Phase D — First boot, seed, admin, firewall
 ```bash
