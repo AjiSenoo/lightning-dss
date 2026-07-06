@@ -86,12 +86,15 @@ def calculate_component_ahi(component, asset) -> dict:
             'corrosion_applied': False,
             'hard_failed': False,
             'latest_status': None,
+            'strikes_since_install': 0,
         }
 
-    # Only count strikes after this component was installed (resets on replacement)
-    events_since_install = asset.events.filter(
+    # Only count strikes after this component was installed (resets on replacement).
+    # Materialize once: it's iterated by _stress_score below and counted for the return dict,
+    # so a list avoids a second COUNT query.
+    events_since_install = list(asset.events.filter(
         timestamp__date__gte=component.install_date
-    )
+    ))
 
     # Latest inspection status for this specific component
     latest_status = (
@@ -154,6 +157,7 @@ def calculate_component_ahi(component, asset) -> dict:
         'corrosion_applied': corrosion_applied,
         'hard_failed':       hard_failed,
         'latest_status':     status_str,
+        'strikes_since_install': len(events_since_install),
     }
 
 

@@ -235,14 +235,18 @@ HARD_FAIL_STATUSES = {
     'SPD': {'Failed'},
 }
 
-# SPD (Type-1 surge arrester) proactive-inspection triggers — see check_component_lifespan.
-# The arrester is internal LPS at the LPZ0/LPZ1 boundary (service entrance), bonded to the
-# Main Earthing Terminal / equipotential bonding bar together with the grounding electrode
-# (IEC 62305-4 Cl.5.3 & 5.4; IEC 61643-11 Type 1; mandatory where an external LPS exists per
-# IEC 60364-5-53). Field practice: re-inspect every 5 years OR after ~25 recorded strikes,
-# because electronic damage propagates through this shared-earth path first.
+# SPD (Type-1 surge arrester) surge-life triggers — see check_component_lifespan &
+# recommendations. The arrester is internal LPS at the LPZ0/LPZ1 boundary (service entrance),
+# bonded to the Main Earthing Terminal / equipotential bonding bar together with the grounding
+# electrode (IEC 62305-4 Cl.5.3 & 5.4; IEC 61643-11 Type 1; mandatory where an external LPS
+# exists per IEC 60364-5-53). Electronic damage propagates through this shared-earth path first,
+# so the arrester has a finite rated surge life. Two thresholds, warn -> replace:
+#   * SPD_WARN_STRIKE_COUNT   (~80% of rated life) -> priority inspection + 'warning' notice.
+#   * SPD_REPLACE_STRIKE_COUNT (rated surge life)  -> immediate replace + 'urgent' notice.
+# Time-based re-inspection every SPD_INSPECTION_INTERVAL_YEARS complements the strike count.
 SPD_INSPECTION_INTERVAL_YEARS = int(os.getenv('SPD_INSPECTION_INTERVAL_YEARS', '5'))
-SPD_INSPECTION_STRIKE_COUNT   = int(os.getenv('SPD_INSPECTION_STRIKE_COUNT', '25'))
+SPD_REPLACE_STRIKE_COUNT      = int(os.getenv('SPD_REPLACE_STRIKE_COUNT', '25'))
+SPD_WARN_STRIKE_COUNT         = int(os.getenv('SPD_WARN_STRIKE_COUNT', '20'))
 
 # Periodic (calendar) inspection cadence for 'besar'-strike-exposed assets: biyearly =
 # twice a year (semiannual). Complements the condition-based engine with a baseline cycle.

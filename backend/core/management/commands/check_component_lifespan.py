@@ -45,23 +45,26 @@ class Command(BaseCommand):
                 usage = age_years / lifespan_years
                 remaining_months = (lifespan_years - age_years) * 12
 
-                # SPD (Type-1 arrester) has an extra proactive-inspection trigger: re-inspect
-                # every SPD_INSPECTION_INTERVAL_YEARS OR after SPD_INSPECTION_STRIKE_COUNT strikes
-                # recorded on the asset since this SPD was installed (electronic damage propagates
-                # through the shared-earth path first). Either crossing escalates to 'warning'.
-                spd_trigger = False
+                # SPD (Type-1 arrester) has an extra strike-based surge-life trigger, counting
+                # strikes recorded on the asset since this SPD was installed (electronic damage
+                # propagates through the shared-earth path first). Two levels, warn -> replace:
+                #   * >= SPD_REPLACE_STRIKE_COUNT  -> rated surge life exhausted -> 'urgent'.
+                #   * >= SPD_WARN_STRIKE_COUNT, or time-based re-inspection due -> 'warning'.
+                spd_replace = False
+                spd_warn = False
                 if comp.component_type == 'SPD':
                     strikes_since_install = comp.asset.events.filter(
                         timestamp__date__gte=comp.install_date,
                     ).count()
-                    spd_trigger = (
+                    spd_replace = strikes_since_install >= cfg.SPD_REPLACE_STRIKE_COUNT
+                    spd_warn = (
                         age_years >= cfg.SPD_INSPECTION_INTERVAL_YEARS
-                        or strikes_since_install >= cfg.SPD_INSPECTION_STRIKE_COUNT
+                        or strikes_since_install >= cfg.SPD_WARN_STRIKE_COUNT
                     )
 
-                if usage >= urgent_frac or remaining_months < urgent_months:
+                if usage >= urgent_frac or remaining_months < urgent_months or spd_replace:
                     tier = 'urgent'
-                elif usage >= warning_frac or spd_trigger:
+                elif usage >= warning_frac or spd_warn:
                     tier = 'warning'
                 else:
                     continue

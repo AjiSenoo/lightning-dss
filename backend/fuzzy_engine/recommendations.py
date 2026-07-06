@@ -84,6 +84,17 @@ def recommend_for_component(
                 'physical', f'{component_type}_HIGH_LEAKAGE',
             )
 
+    # For SPD, the arrester has a finite rated surge life: once the recorded strikes since
+    # install reach SPD_REPLACE_STRIKE_COUNT the MOV is presumed exhausted and must be
+    # replaced immediately, independent of fuzzy urgency (IEC 61643-11 Type-1 surge life).
+    # The count resets on replacement (events are filtered by the component install date).
+    strikes = ahi_result.get('strikes_since_install', 0)
+    if component_type == 'SPD' and strikes >= cfg.SPD_REPLACE_STRIKE_COUNT:
+        return _recommendation(
+            component_type, 'replace', 'immediate', urgency_label,
+            'stress', f'{component_type}_STRIKE_LIMIT',
+        )
+
     # --- Rule 2: branch on fuzzy urgency ---
     if urgency_label == 'Inspeksi Darurat':
         if driver == 'physical':
@@ -104,6 +115,20 @@ def recommend_for_component(
     else:  # Inspeksi Rutin
         action       = 'monitor'
         time_horizon = 'next_cycle'
+
+    # SPD approaching its rated surge life (warn <= strikes < replace): don't let it sit on a
+    # silent 'monitor'. Raise a priority inspection so the arrester is checked before the
+    # replace threshold is crossed. Only upgrades the routine case — never downgrades an
+    # already-urgent physical/fuzzy result computed above.
+    if (
+        component_type == 'SPD'
+        and action == 'monitor'
+        and cfg.SPD_WARN_STRIKE_COUNT <= strikes < cfg.SPD_REPLACE_STRIKE_COUNT
+    ):
+        return _recommendation(
+            component_type, 'inspect', 'within_6_months', 'Inspeksi Prioritas',
+            'stress', f'{component_type}_STRIKE_WARNING',
+        )
 
     rationale_id = f'{component_type}_{driver.upper()}_{urgency_label.split()[-1].upper()}'
     return _recommendation(component_type, action, time_horizon, urgency_label, driver, rationale_id)
