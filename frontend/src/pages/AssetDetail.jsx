@@ -87,6 +87,7 @@ const COMPONENT_LABELS = {
   GR:  'Grounding Electrode',
   BND: 'Equipotential Bonding',
   SPD: 'Surge Protective Device',
+  SHD: 'Shielding',
   EQP: 'Protected Equipment',
 }
 const ACTION_LABELS    = { replace: 'Ganti', repair: 'Perbaiki', inspect: 'Periksa', monitor: 'Pantau', install: 'Pasang' }
@@ -292,7 +293,7 @@ export default function AssetDetail() {
 
   const ahi = asset.ahi_breakdown ?? null
 
-  const hasMoreActions = ['AT', 'DC', 'GR', 'BND', 'SPD'].some(
+  const hasMoreActions = ['AT', 'DC', 'GR', 'BND', 'SPD', 'SHD'].some(
     (ct) => maintenanceHistory.filter((a) => a.component_type === ct).length > 5
   )
 
@@ -330,8 +331,9 @@ export default function AssetDetail() {
                 <StatusChip label="AT"  value={log.status_air_terminal} />
                 <StatusChip label="DC"  value={log.status_down_conductor} />
                 <StatusChip label="GD"  value={log.status_grounding} />
-                {log.status_bonding && <StatusChip label="BND" value={log.status_bonding} />}
-                {log.status_spd     && <StatusChip label="SPD" value={log.status_spd} />}
+                {log.status_bonding   && <StatusChip label="BND" value={log.status_bonding} />}
+                {log.status_spd       && <StatusChip label="SPD" value={log.status_spd} />}
+                {log.status_shielding && <StatusChip label="SHD" value={log.status_shielding} />}
               </span>
               {log.amends && (
                 <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Amandemen</span>
@@ -595,7 +597,7 @@ export default function AssetDetail() {
 
           {ahi ? (
             <div className="space-y-3 pt-1">
-              {['AT', 'DC', 'GR', 'BND', 'SPD'].map((ct) => {
+              {['AT', 'DC', 'GR', 'BND', 'SPD', 'SHD'].map((ct) => {
                 const comp       = ahi.per_component?.[ct]
                 const rec        = asset.recommendations?.per_component?.find((r) => r.component_type === ct)
                 if (!comp) return null
@@ -731,7 +733,7 @@ export default function AssetDetail() {
             </button>
           )}
         </div>
-        {['AT', 'DC', 'GR', 'BND', 'SPD'].map((ct) => renderComponentSection(ct, 5))}
+        {['AT', 'DC', 'GR', 'BND', 'SPD', 'SHD'].map((ct) => renderComponentSection(ct, 5))}
         {allComponents.length === 0 && maintenanceHistory.length === 0 && (
           <p className="text-sm text-gray-400">Belum ada data komponen</p>
         )}
@@ -759,7 +761,7 @@ export default function AssetDetail() {
               <button className="text-gray-400 hover:text-gray-600 text-lg leading-none" onClick={() => setShowComponentsModal(false)}>✕</button>
             </div>
             <div className="overflow-y-auto p-6 space-y-4">
-              {['AT', 'DC', 'GR', 'BND', 'SPD'].map((ct) => renderComponentSection(ct, null))}
+              {['AT', 'DC', 'GR', 'BND', 'SPD', 'SHD'].map((ct) => renderComponentSection(ct, null))}
             </div>
           </div>
         </div>
@@ -771,7 +773,7 @@ export default function AssetDetail() {
             <div>
               <h3 className="font-bold text-gray-900">Ganti Aset Lengkap</h3>
               <p className="text-xs text-gray-500 mt-1">
-                Aset <strong>{asset.nama_gedung}</strong> akan diarsipkan dan digantikan aset baru dengan komponen AT, DC, GR, BND, SPD, dan EQP segar.
+                Aset <strong>{asset.nama_gedung}</strong> akan diarsipkan dan digantikan aset baru dengan komponen AT, DC, GR, BND, SPD, SHD, dan EQP segar.
                 Data sambaran &amp; inspeksi lama tetap melekat pada aset yang diarsipkan.
               </p>
             </div>

@@ -284,7 +284,7 @@ class InspectionLogSerializer(serializers.ModelSerializer):
             'tgl_inspeksi', 'status_air_terminal', 'status_down_conductor',
             'status_grounding', 'resistansi_grounding_ohm',
             'status_spd', 'arus_bocor_spd_ma', 'status_bonding',
-            'status_kabel_instalasi', 'catatan_teknisi',
+            'status_shielding', 'catatan_teknisi',
             'amends', 'amendments', 'created_at',
             'updated_at', 'updated_by', 'updated_by_nama', 'updated_by_username',
             'deleted_at', 'deleted_by', 'deleted_by_nama', 'purge_at',
@@ -301,6 +301,32 @@ class InspectionLogSerializer(serializers.ModelSerializer):
             'verified_by_nama', 'verified_by_username', 'revision_requested_by_nama',
             'verification_status',
         ]
+
+    # All six component statuses (LPS Eksternal AT/DC/GR + LPS Internal SPD/BND/SHD) are
+    # mandatory: an inspection cannot be submitted unless every status is chosen.
+    _REQUIRED_STATUS_FIELDS = {
+        'status_air_terminal':   'Status Air Terminal wajib diisi.',
+        'status_down_conductor': 'Status Down Conductor wajib diisi.',
+        'status_grounding':      'Status Grounding wajib diisi.',
+        'status_spd':            'Status SPD wajib diisi.',
+        'status_bonding':        'Status Bonding wajib diisi.',
+        'status_shielding':      'Status Spatial Shielding wajib diisi.',
+    }
+
+    def validate(self, attrs):
+        errors = {}
+        for field, message in self._REQUIRED_STATUS_FIELDS.items():
+            if field in attrs:
+                value = attrs.get(field)
+            elif self.instance is not None:
+                value = getattr(self.instance, field, '')
+            else:
+                value = ''
+            if not (value or '').strip():
+                errors[field] = [message]
+        if errors:
+            raise serializers.ValidationError(errors)
+        return attrs
 
     def get_amendments(self, obj):
         return [str(a.log_id) for a in obj.amendments.all()]

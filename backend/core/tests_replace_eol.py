@@ -50,8 +50,8 @@ class AssetReplaceDatingTests(_Base):
 
         new_asset = AssetRegistry.objects.get(asset_id=resp.data['asset_id'])
         comps = new_asset.components.filter(end_date__isnull=True)
-        # Full functional chain AT/DC/GR/BND/SPD/EQP is auto-created on the new asset.
-        self.assertEqual(comps.count(), 6)
+        # Full functional chain AT/DC/GR/BND/SPD/SHD/EQP is auto-created on the new asset.
+        self.assertEqual(comps.count(), 7)
         for c in comps:
             self.assertEqual(c.install_date, today)  # age starts at 0 days, not Jan 1
         self.assertEqual(new_asset.tahun_instalasi, today.year)

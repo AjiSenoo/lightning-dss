@@ -103,16 +103,14 @@ export const COMPONENT_OPTIONS = {
     { value: 'Failed', label: 'Failed' },
   ],
   bonding: [
-    { value: '', label: 'Tidak Diperiksa' },
     { value: 'OK', label: 'OK' },
     { value: 'Longgar', label: 'Longgar' },
     { value: 'Terputus', label: 'Terputus' },
   ],
-  kabel: [
-    { value: '', label: 'Tidak Diperiksa' },
+  shielding: [
     { value: 'OK', label: 'OK' },
-    { value: 'Terkelupas', label: 'Terkelupas' },
-    { value: 'Terbakar', label: 'Terbakar' },
+    { value: 'Terkorosi', label: 'Terkorosi' },
+    { value: 'Terputus', label: 'Terputus' },
   ],
 }
 

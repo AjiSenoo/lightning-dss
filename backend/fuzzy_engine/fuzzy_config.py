@@ -143,6 +143,8 @@ LPL_DESIGN_CAPACITY = {
 #   GR : d ∝ I   (soil ionisation onset; linear)
 #   BND: d ∝ I   (joint ohmic/mechanical wear; linear in impulse current per IEC 62305-3 Cl.5)
 #   SPD: d ∝ I²  (MOV absorbed energy ∝ I²·t; IEC 61643-12 Cl.8 — quadratic)
+#   SHD: d ∝ I   (shielding effectiveness degrades ~linearly with mesh cross-section loss;
+#                 IEC 62305-4 Annex B — linear, mirrors GR/BND)
 #   EQP: excluded (sink node; no lightning-current damage modeled)
 DAMAGE_EXPONENT = {
     'AT': 1.0,
@@ -150,18 +152,25 @@ DAMAGE_EXPONENT = {
     'GR': 1.0,
     'BND': 1.0,
     'SPD': 2.0,
+    'SHD': 1.0,
 }
 
 # Aggregation weights for "Overall Health" (AHI_overall) trending number.
-# Weights must sum to 1.0 across the five degrading components (EQP excluded: weight 0).
-# Re-weighted per field-expert validation (LPS practitioner, Indonesia): the Air Terminal
-# and the termination kit (folded into DC as the DC 'TK_Rusak' hard-fail) are reported as
-# the MOST FREQUENTLY DAMAGED components in the field, so AT (0.28) and DC (0.26) lead.
-# GR lowered to 0.20: still safety-relevant (SNI 03-7015-2004 ≤5 Ω) but not the most
-# frequent failure per practitioner experience. SPD (0.16) kept above BND (0.10): the
-# sacrificial MOV (Type-1 arrester, internal LPS) ages fastest and is where electronic
-# damage propagates ("jangkauan sampai internal LPS"). External LPS (AT+DC+GR = 0.74)
-# stays dominant as the primary current-conduction path.
+# Weights must sum to 1.0 across the six degrading components (EQP excluded: weight 0).
+# Grouped per IEC 62305 into LPS Eksternal (AT+DC+GR = 0.74, IEC 62305-3) and LPS Internal
+# (SPD+BND+SHD = 0.26, IEC 62305-4). Re-weighted per field-expert validation (LPS
+# practitioner, Indonesia): the Air Terminal and the termination kit (folded into DC as the
+# DC 'TK_Rusak' hard-fail) are reported as the MOST FREQUENTLY DAMAGED components in the
+# field, so AT (0.28) and DC (0.26) lead. GR lowered to 0.20: still safety-relevant
+# (SNI 03-7015-2004 ≤5 Ω) but not the most frequent failure per practitioner experience.
+# Internal LPS: SPD and BND are treated as EQUAL (0.10 each) — the sacrificial MOV (Type-1
+# arrester) and the equipotential bonding continuity are both series-critical internal links
+# whose failure opens the internal-LPS current path (IEC 62305-4 Cl.5.3–5.4). Shielding
+# (SHD 0.06) is the LIGHTEST internal contributor: spatial/magnetic shielding
+# (IEC 62305-4 Cl.5.2) is a preventive field-attenuation measure rather than a series
+# current-conduction path, so its degradation is weighted below the two current-carrying
+# internal links. External LPS (AT+DC+GR = 0.74) stays dominant as the primary
+# current-conduction path.
 # Source: field-practitioner validation (interpretasi persentase dibuat sendiri), anchored
 # on SNI 03-7015-2004 inspection priorities and CIGRE TB 858 "choose to suit the application".
 # Flag for thesis: weights are practitioner-informed engineering estimates — AHP
@@ -171,7 +180,8 @@ COMPONENT_WEIGHTS = {
     'DC':  float(os.getenv('W_COMPONENT_DC',  '0.26')),
     'GR':  float(os.getenv('W_COMPONENT_GR',  '0.20')),
     'BND': float(os.getenv('W_COMPONENT_BND', '0.10')),
-    'SPD': float(os.getenv('W_COMPONENT_SPD', '0.16')),
+    'SPD': float(os.getenv('W_COMPONENT_SPD', '0.10')),
+    'SHD': float(os.getenv('W_COMPONENT_SHD', '0.06')),
     'EQP': 0.0,  # sink node — excluded from overall health
 }
 # Guard: overall-health weights (excluding EQP sink) must sum to 1.0.
@@ -190,14 +200,16 @@ assert abs(_component_weight_sum - 1.0) < 1e-6, (
 #   SPD 10 yr (sacrificial MOV device; manufacturer guidance + IEC 61643-12 Cl.9.2;
 #              tropical derating to 8 yr for higher flash density and humidity-accelerated
 #              metal oxide degradation).
+#   SHD 40 yr (metallic mesh/rebar spatial shield, corrosion-limited — same profile as GR
+#              per IEC 62305-4 Cl.5.2; tropical derating to 33 yr).
 # Tropical Indonesia profile derates ~25% for higher flash density (Hidayat & Ishii 1998)
 # and acidic-laterite corrosion (NBS Circular 579). Default stays 'temperate' for backward
 # compatibility; per-component LIFESPAN_* env vars still override the selected profile.
 # EQP excluded — no lifespan modeled (sink node).
 SITE_CLIMATE_PROFILE = os.getenv('SITE_CLIMATE_PROFILE', 'temperate').lower()
 _LIFESPAN_PROFILES = {
-    'temperate': {'AT': 25, 'DC': 30, 'GR': 40, 'BND': 30, 'SPD': 10},
-    'tropical':  {'AT': 20, 'DC': 25, 'GR': 33, 'BND': 25, 'SPD': 8},
+    'temperate': {'AT': 25, 'DC': 30, 'GR': 40, 'BND': 30, 'SPD': 10, 'SHD': 40},
+    'tropical':  {'AT': 20, 'DC': 25, 'GR': 33, 'BND': 25, 'SPD': 8,  'SHD': 33},
 }
 _lifespan_base = _LIFESPAN_PROFILES.get(SITE_CLIMATE_PROFILE, _LIFESPAN_PROFILES['temperate'])
 DESIGN_LIFESPAN_BY_COMPONENT = {
@@ -206,16 +218,19 @@ DESIGN_LIFESPAN_BY_COMPONENT = {
     'GR':  int(os.getenv('LIFESPAN_GR',  str(_lifespan_base['GR']))),
     'BND': int(os.getenv('LIFESPAN_BND', str(_lifespan_base['BND']))),
     'SPD': int(os.getenv('LIFESPAN_SPD', str(_lifespan_base['SPD']))),
+    'SHD': int(os.getenv('LIFESPAN_SHD', str(_lifespan_base['SHD']))),
 }
 
 # Hard-fail status values: a confirmed functional failure of the component.
 # Single source of truth for three behaviours: (1) zero the component AHI
 # (weakest-link override, see CONDITION_FACTOR below), (2) emit an immediate-replace
 # recommendation, and (3) fire a `component_hard_fail` notification.
-# Rationale: the full LPS is a functional series chain AT -> DC -> GR -> BND -> SPD -> EQP
+# Rationale: the full LPS is a functional series chain AT -> DC -> GR -> BND -> SPD -> SHD -> EQP
 # (IEC 62305-3:2010 Sec.5 external + IEC 62305-4 internal LPS); any broken link destroys
 # the protection function, so the observed-failure statuses below are replacement triggers
 # per IEC 62305-3 Clause 7 / IEC 62305-4 Cl.5.
+# 'Terputus' for SHD: open/discontinuous spatial shield (mesh/rebar) = loss of the
+# shielding function per IEC 62305-4 Cl.5.2 (shields must be bonded and continuous).
 # 'High_Resistance' is included for GR because >5 ohm violates SNI 03-7015:2004 Sec.6.5.7 /
 # PUIL 2011 even when no numeric reading is supplied (numeric path:
 # GR_RESISTANCE_REPLACE_THRESHOLD_OHM).
@@ -233,6 +248,7 @@ HARD_FAIL_STATUSES = {
     'GR':  {'High_Resistance'},
     'BND': {'Terputus'},
     'SPD': {'Failed'},
+    'SHD': {'Terputus'},
 }
 
 # SPD (Type-1 surge arrester) surge-life triggers — see check_component_lifespan &

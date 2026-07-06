@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <title>Laporan Inspeksi {{ asset.nama_gedung }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 1.8cm 1.6cm 2cm 1.6cm;
+      @bottom-center {
+        content: "Halaman " counter(page) " dari " counter(pages);
+        font-size: 8pt;
+        color: #888;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 10pt;
+      color: #1a1a1a;
+      line-height: 1.45;
+    }
+    h1 { font-size: 16pt; margin: 0 0 2pt 0; }
+    h2 {
+      font-size: 11pt;
+      margin: 16pt 0 6pt 0;
+      padding-bottom: 3pt;
+      border-bottom: 1.5pt solid #1d4ed8;
+      color: #1d4ed8;
+      text-transform: uppercase;
+      letter-spacing: 0.4pt;
+    }
+    .subtitle { color: #666; font-size: 9pt; margin: 0 0 12pt 0; }
+    .header {
+      border-bottom: 2pt solid #1d4ed8;
+      padding-bottom: 10pt;
+      margin-bottom: 6pt;
+    }
+    .meta-grid {
+      display: table;
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .meta-row { display: table-row; }
+    .meta-label, .meta-value {
+      display: table-cell;
+      padding: 3pt 6pt;
+      vertical-align: top;
+      border-bottom: 0.5pt solid #e5e7eb;
+    }
+    .meta-label { color: #555; width: 34%; font-weight: 600; }
+    table.status {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 4pt;
+    }
+    table.status th, table.status td {
+      text-align: left;
+      padding: 5pt 7pt;
+      border-bottom: 0.5pt solid #e5e7eb;
+      font-size: 9.5pt;
+    }
+    table.status th {
+      background: #f1f5f9;
+      font-size: 8.5pt;
+      text-transform: uppercase;
+      letter-spacing: 0.3pt;
+      color: #475569;
+    }
+    .badge {
+      display: inline-block;
+      padding: 1.5pt 7pt;
+      border-radius: 8pt;
+      font-size: 8.5pt;
+      font-weight: 700;
+    }
+    .badge-ok      { background: #dcfce7; color: #166534; }
+    .badge-warn    { background: #fef9c3; color: #854d0e; }
+    .badge-bad     { background: #fee2e2; color: #991b1b; }
+    .badge-neutral { background: #e5e7eb; color: #374151; }
+    .health-box {
+      display: table; width: 100%; margin-top: 4pt;
+      border: 1pt solid #e5e7eb; border-radius: 6pt; overflow: hidden;
+    }
+    .health-cell { display: table-cell; padding: 10pt 12pt; vertical-align: middle; }
+    .health-score { font-size: 26pt; font-weight: 800; color: #1d4ed8; }
+    .health-label { font-size: 9pt; color: #555; }
+    ul.recs { margin: 4pt 0 0 0; padding-left: 16pt; }
+    ul.recs li { margin-bottom: 4pt; }
+    .rec-headline {
+      background: #eff6ff; border: 1pt solid #bfdbfe; border-radius: 6pt;
+      padding: 8pt 10pt; margin-top: 4pt; font-size: 9.5pt;
+    }
+    .notes {
+      background: #f8fafc; border: 1pt solid #e5e7eb; border-radius: 6pt;
+      padding: 8pt 10pt; margin-top: 4pt; white-space: pre-wrap; min-height: 30pt;
+    }
+    .muted { color: #94a3b8; font-style: italic; }
+    .footer-note { margin-top: 18pt; font-size: 8pt; color: #94a3b8; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Laporan Inspeksi Sistem Proteksi Petir</h1>
+    <p class="subtitle">{{ asset.nama_gedung }} &middot; LPL {{ asset.lpl_grade }}
+      {% if org_nama %}&middot; {{ org_nama }}{% endif %}</p>
+  </div>
+
+  <h2>Informasi Aset &amp; Inspeksi</h2>
+  <div class="meta-grid">
+    <div class="meta-row">
+      <div class="meta-label">Nama Gedung</div>
+      <div class="meta-value">{{ asset.nama_gedung }}</div>
+    </div>
+    <div class="meta-row">
+      <div class="meta-label">Lokasi (GPS)</div>
+      <div class="meta-value">{{ asset.lokasi_gps|default:"-" }}</div>
+    </div>
+    <div class="meta-row">
+      <div class="meta-label">Level Proteksi (LPL)</div>
+      <div class="meta-value">{{ asset.lpl_grade }} ({{ asset.kapasitas_desain_ka }} kA)</div>
+    </div>
+    <div class="meta-row">
+      <div class="meta-label">Tanggal Inspeksi</div>
+      <div class="meta-value">{{ tgl_inspeksi }}</div>
+    </div>
+    <div class="meta-row">
+      <div class="meta-label">Inspektur</div>
+      <div class="meta-value">{{ inspector_nama|default:"-" }}</div>
+    </div>
+    <div class="meta-row">
+      <div class="meta-label">Status Verifikasi</div>
+      <div class="meta-value">
+        {% if verification_status == 'verified' %}
+          <span class="badge badge-ok">Terverifikasi</span>
+          {% if verified_by_nama %}oleh {{ verified_by_nama }}{% endif %}
+        {% elif verification_status == 'revision_requested' %}
+          <span class="badge badge-warn">Perlu Revisi</span>
+        {% else %}
+          <span class="badge badge-neutral">Menunggu Verifikasi</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <h2>LPS Eksternal (IEC 62305-3)</h2>
+  <table class="status">
+    <thead>
+      <tr><th>Komponen</th><th>Status</th><th>Keterangan</th></tr>
+    </thead>
+    <tbody>
+      {% for row in eksternal %}
+      <tr>
+        <td>{{ row.label }}</td>
+        <td><span class="badge {{ row.badge }}">{{ row.status }}</span></td>
+        <td>{{ row.extra|default:"" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>LPS Internal (IEC 62305-4)</h2>
+  <table class="status">
+    <thead>
+      <tr><th>Komponen</th><th>Status</th><th>Keterangan</th></tr>
+    </thead>
+    <tbody>
+      {% for row in internal %}
+      <tr>
+        <td>{{ row.label }}</td>
+        <td><span class="badge {{ row.badge }}">{{ row.status }}</span></td>
+        <td>{{ row.extra|default:"" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Skor Kesehatan Aset</h2>
+  <div class="health-box">
+    <div class="health-cell" style="width: 30%; text-align:center; background:#f8fafc;">
+      <div class="health-score">{{ health_percent }}</div>
+      <div class="health-label">Skor Kesehatan Keseluruhan</div>
+    </div>
+    <div class="health-cell">
+      <div class="health-label">
+        AHI Safety (weakest-link): <strong>{{ health_safety_percent }}%</strong><br>
+        {% if worst_component %}Komponen terlemah: <strong>{{ worst_component }}</strong>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <h2>Rekomendasi Tindakan</h2>
+  {% if headline %}
+    <div class="rec-headline">
+      <strong>Prioritas Utama:</strong> {{ headline }}
+    </div>
+  {% endif %}
+  {% if recommendations %}
+    <ul class="recs">
+      {% for rec in recommendations %}
+      <li>{{ rec }}</li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">Tidak ada rekomendasi tindakan khusus.</p>
+  {% endif %}
+
+  <h2>Catatan Teknisi</h2>
+  <div class="notes">{% if catatan_teknisi %}{{ catatan_teknisi }}{% else %}<span class="muted">Tidak ada catatan.</span>{% endif %}</div>
+
+  <p class="footer-note">
+    Dokumen ini dihasilkan secara otomatis oleh SPP-CBM (Sistem Pendukung Pemeliharaan
+    berbasis Kondisi) pada {{ generated_at }}.
+  </p>
+</body>
+</html>

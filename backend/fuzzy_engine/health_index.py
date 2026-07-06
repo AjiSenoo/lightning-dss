@@ -138,10 +138,11 @@ def calculate_component_ahi(component, asset) -> dict:
     # Weakest-link override: a confirmed functional failure (hard-fail status) means the
     # component cannot perform its protective role, so its AHI collapses to 0 regardless of
     # how favourable the stress/age proxies look. The LPS is a functional series chain
-    # AT -> DC -> GR -> BND -> SPD -> EQP (external LPS IEC 62305-3:2010 Sec.5 + internal
+    # AT -> DC -> GR -> BND -> SPD -> SHD -> EQP (external LPS IEC 62305-3:2010 Sec.5 + internal
     # LPS IEC 62305-4 Sec.5: BND = equipotential bonding, SPD = Type-1 surge arrester bonded
-    # to the earthing system near GR at the LPZ0/1 boundary); a broken link destroys the
-    # protection function (reinforced by Birnbaum reliability importance for series systems).
+    # to the earthing system near GR at the LPZ0/1 boundary, SHD = spatial/magnetic shielding
+    # per IEC 62305-4 Cl.5.2); a broken link destroys the protection function (reinforced by
+    # Birnbaum reliability importance for series systems).
     status_str = latest_status.status if latest_status is not None else None
     hard_failed = status_str in cfg.HARD_FAIL_STATUSES.get(component.component_type, set())
     if hard_failed:

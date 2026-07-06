@@ -19,7 +19,7 @@ pembimbing menyetujui pendekatan ini.
 Sistem kini memodelkan jalur proteksi lengkap sesuai IEC 62305 dalam satu rantai seri
 fungsional:
 
-**AT → DC → GR → BND → SPD → EQP**
+**AT → DC → GR → BND → SPD → SHD → EQP**
 
 di mana:
 - **AT, DC, GR** — LPS Eksternal (IEC 62305-3:2010 Klausul 5)
@@ -27,6 +27,9 @@ di mana:
   Klausul 5.4)
 - **SPD** (Surge Protective Device) — LPS Internal, perangkat proteksi surja (IEC 62305-4
   Klausul 5.3; IEC 61643-11)
+- **SHD** (Spatial Shielding) — LPS Internal, perisai spasial/magnetik yang meredam medan
+  elektromagnetik surja (IEC 62305-4:2010 Klausul 5.2); merupakan tindakan preventif
+  atenuasi medan, bukan elemen konduksi arus seri
 - **EQP** (Protected Equipment) — simpul terminal (titik akhir rantai); dimodelkan sebagai
   *boundary marker* dengan AHI tetap 1,0 dan bobot 0 — jujur bahwa komponen ini bukan
   elemen yang terdegradasi akibat petir, melainkan penanda bahwa sistem proteksi telah
@@ -35,11 +38,14 @@ di mana:
 **Batasan Masalah yang diperbarui (ganti poin 1 dan paragraf pengecualian):**
 > "Ruang lingkup pemantauan kondisi fisik mencakup rantai fungsional sistem proteksi petir
 > secara lengkap, meliputi komponen LPS Eksternal (*Air Terminal*, *Down Conductor*,
-> *Grounding Electrode*) maupun LPS Internal (*Equipotential Bonding* dan *Surge Protective
-> Device*), serta simpul terminal *Protected Equipment* sebagai penanda akhir rantai proteksi.
-> Pemilihan ini mengacu pada IEC 62305-3:2010 Klausul 5 (LPS Eksternal) dan IEC 62305-4:2010
-> Klausul 5 (LPS Internal) yang bersama-sama mendefinisikan jalur lengkap penangkap,
-> penyalur, pelepas, dan peredaman surja arus petir hingga peralatan terproteksi."
+> *Grounding Electrode*) maupun LPS Internal (*Equipotential Bonding*, *Surge Protective
+> Device*, dan *Spatial Shielding*), serta simpul terminal *Protected Equipment* sebagai
+> penanda akhir rantai proteksi. Seluruh komponen tersebut kini bersifat **wajib diinspeksi**
+> (tidak ada lagi komponen opsional); komponen *Kabel Instalasi* pada versi sebelumnya
+> dihapus. Pemilihan ini mengacu pada IEC 62305-3:2010 Klausul 5 (LPS Eksternal) dan
+> IEC 62305-4:2010 Klausul 5 (LPS Internal, mencakup *shielding* spasial pada Klausul 5.2)
+> yang bersama-sama mendefinisikan jalur lengkap penangkap, penyalur, pelepas, peredaman
+> surja arus petir, serta atenuasi medan elektromagnetik hingga peralatan terproteksi."
 
 ---
 
@@ -54,6 +60,7 @@ di mana:
 | GR  | 1,0 (linear) | Ionisasi tanah pada puncak I; IEC 62305-1 Annex D |
 | BND | 1,0 (linear) | Keausan ohmik/mekanis sambungan ~ linear terhadap I; IEC 62305-3 Klausul 5 |
 | SPD | 2,0 (kuadratik) | Energi yang diserap MOV ∝ I²·t; IEC 61643-12 Klausul 8 |
+| SHD | 1,0 (linear) | Efektivitas *shielding* menurun ~linear terhadap kehilangan penampang mesh; IEC 62305-4 Annex B |
 
 ### 2.2 Bobot Komponen dalam AHI Keseluruhan
 
@@ -62,16 +69,21 @@ Bobot di-*rekalibrasi* berdasarkan validasi pakar lapangan (praktisi LPS, Indone
 sering rusak** di lapangan, sehingga AT dan DC menjadi yang tertinggi. GR diturunkan (tetap
 relevan keselamatan, tetapi bukan kegagalan tersering menurut pengalaman lapangan).
 "Interpretasi persentase dibuat sendiri" — nilai adalah estimasi rekayasa berbasis pakar.
+LPS Eksternal (AT+DC+GR = 0,74) tetap dominan sebagai jalur konduksi arus utama; sisa
+bobot LPS Internal (0,26) dibagi ke SPD dan BND yang **setara** (0,10 masing-masing) sebagai
+dua *link* internal seri yang sama-sama kritis, serta SHD (0,06) sebagai kontributor internal
+teringan karena bersifat preventif (atenuasi medan), bukan elemen konduksi arus seri.
 
 | Komponen | Bobot | Justifikasi |
 |----------|-------|-------------|
 | AT  | 0,28 | LPS Eksternal; **paling sering rusak** menurut pakar lapangan → bobot tertinggi |
 | DC  | 0,26 | LPS Eksternal; mencakup *termination kit* (status hard-fail `TK_Rusak`) yang juga sering rusak |
 | GR  | 0,20 | LPS Eksternal; tetap relevan keselamatan (SNI 03-7015-2004 ≤5 Ω) namun bukan kegagalan tersering |
-| BND | 0,10 | LPS Internal; konduktor bonding lebih tahan lama dari SPD |
-| SPD | 0,16 | LPS Internal; elemen sacrificial, penuaan lebih cepat (IEC 61643-12) — lebih besar dari BND |
+| SPD | 0,10 | LPS Internal; MOV *sacrificial* (IEC 61643-11) — *link* internal seri kritis, **setara BND** |
+| BND | 0,10 | LPS Internal; kontinuitas ikatan ekuipotensial (IEC 62305-4 Klausul 5.4) — **setara SPD** |
+| SHD | 0,06 | LPS Internal; perisai spasial (IEC 62305-4 Klausul 5.2) — tindakan preventif atenuasi medan, kontributor internal teringan |
 | EQP | 0,00 | Simpul terminal — dikecualikan dari perhitungan kesehatan |
-| **Total** | **1,00** | |
+| **Total** | **1,00** | Eksternal 0,74 / Internal 0,26 |
 
 > **Catatan sinkronisasi laporan:** nilai ini WAJIB cocok dengan `COMPONENT_WEIGHTS` di
 > `fuzzy_config.py` dan justifikasi Bab IV.
@@ -101,6 +113,7 @@ sebagai pekerjaan lanjutan (sudah tercantum di Bab VII Saran).
 | GR  | 33 tahun | 40 tahun | NBS 45-yr study Cu-clad steel (nilai existing) |
 | BND | 25 tahun | 30 tahun | Konduktor bonding Cu; IEC 62305-3 Annex E; setara DC |
 | SPD | 8 tahun  | 10 tahun | Perangkat sacrificial MOV; panduan pabrikan + IEC 61643-12 Klausul 9.2; iklim tropis mempercepat degradasi oksida logam |
+| SHD | 33 tahun | 40 tahun | Mesh/rebar logam, kegagalan utama korosi; profil setara GR |
 
 **Catatan:** Profil iklim dipilih via variabel lingkungan `SITE_CLIMATE_PROFILE`.
 
@@ -113,6 +126,7 @@ sebagai pekerjaan lanjutan (sudah tercantum di Bab VII Saran).
 | GR  | High_Resistance | >5 Ω — SNI 03-7015:2004 Pasal 6.5.7 / PUIL 2011 |
 | BND | Terputus | Konduktor bonding terbuka — IEC 62305-3 Klausul 5.4 |
 | SPD | Failed | MOV rusak total — IEC 61643-11 Klausul 7 |
+| SHD | Terputus | Perisai terputus/diskontinu = hilangnya fungsi *shielding* — IEC 62305-4 Klausul 5.2 (perisai wajib bonded & kontinu) |
 
 ### 2.5 Ambang Batas Numerik Baru
 
@@ -132,5 +146,6 @@ sebagai pekerjaan lanjutan (sudah tercantum di Bab VII Saran).
   "LPS Internal" dan "LPS Eksternal" sesuai terminologi IEC 62305.
 - EQP ditampilkan sebagai penanda terminal ("Ujung Rantai") di panel kondisi komponen —
   bukan gauge degradasi.
-- Status BND dan SPD kini memicu peringatan non-OK (pita oranye) di formulir inspeksi,
-  setara dengan AT/DC/GR.
+- Status BND, SPD, dan SHD kini memicu peringatan non-OK (pita oranye) di formulir inspeksi,
+  setara dengan AT/DC/GR; seluruh enam komponen menjadi *field* wajib (tanpa bagian opsional),
+  dan komponen *Kabel Instalasi* dihapus.

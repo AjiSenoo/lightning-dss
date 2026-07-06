@@ -125,13 +125,14 @@ class AggregateAHITest(TestCase):
         self.assertAlmostEqual(result['ahi_overall'], 0.583, places=3)
 
     def test_all_healthy(self):
-        # All five degrading components healthy → weights sum to 1.0 → overall 1.0.
+        # All six degrading components healthy → weights sum to 1.0 → overall 1.0.
         component_results = {
             'AT':  self._make_result(1.0),
             'DC':  self._make_result(1.0),
             'GR':  self._make_result(1.0),
             'BND': self._make_result(1.0),
             'SPD': self._make_result(1.0),
+            'SHD': self._make_result(1.0),
         }
         result = aggregate_asset_ahi(component_results)
         self.assertAlmostEqual(result['ahi_safety'], 1.0)

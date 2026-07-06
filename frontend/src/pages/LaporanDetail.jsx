@@ -19,7 +19,7 @@ const FIELD_LABELS = {
   status_spd:            'SPD',
   arus_bocor_spd_ma:     'Arus Bocor SPD (mA)',
   status_bonding:        'Bonding',
-  status_kabel_instalasi:'Kabel Instalasi',
+  status_shielding:      'Shielding',
   catatan_teknisi:       'Catatan Teknisi',
 }
 
@@ -232,6 +232,7 @@ export default function LaporanDetail() {
   const [showVerifyModal, setShowVerifyModal] = useState(false)
   const [showRevisionModal, setShowRevisionModal] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
+  const [pdfLoading, setPdfLoading] = useState(false)
 
   useEffect(() => {
     setLoading(true)
@@ -300,6 +301,26 @@ export default function LaporanDetail() {
       setShowVerifyModal(false)
     } finally {
       setActionLoading(false)
+    }
+  }
+
+  const handleDownloadPdf = async () => {
+    setPdfLoading(true)
+    setError('')
+    try {
+      const res = await client.get(`/inspections/${id}/pdf/`, { responseType: 'blob' })
+      const url = URL.createObjectURL(res.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `Laporan_Inspeksi_${log?.asset_nama_gedung || 'inspeksi'}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err?.response?.data?.detail || 'Gagal mengunduh PDF laporan')
+    } finally {
+      setPdfLoading(false)
     }
   }
 
@@ -393,6 +414,13 @@ export default function LaporanDetail() {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              className="btn-secondary text-sm"
+              onClick={handleDownloadPdf}
+              disabled={pdfLoading}
+            >
+              {pdfLoading ? 'Mengunduh…' : 'Unduh PDF'}
+            </button>
             {canEdit && (
               <button
                 className="btn-secondary text-sm"
@@ -483,13 +511,13 @@ export default function LaporanDetail() {
           )}
         </div>
 
-        {(log?.status_spd || log?.status_bonding || log?.status_kabel_instalasi) && (
+        {(log?.status_spd || log?.status_bonding || log?.status_shielding) && (
           <div>
             <p className="text-xs text-gray-400 mb-2">LPS Internal</p>
             <div className="flex flex-wrap gap-2">
               {log.status_spd && <StatusChip label="SPD" value={log.status_spd} />}
               {log.status_bonding && <StatusChip label="Bonding" value={log.status_bonding} />}
-              {log.status_kabel_instalasi && <StatusChip label="Kabel" value={log.status_kabel_instalasi} />}
+              {log.status_shielding && <StatusChip label="Shielding" value={log.status_shielding} />}
             </div>
           </div>
         )}

@@ -11,7 +11,18 @@ const NON_OK = {
   status_grounding:      (v) => v !== 'OK',
   status_spd:            (v) => v !== 'OK',
   status_bonding:        (v) => v !== '' && v !== 'OK',
+  status_shielding:      (v) => v !== '' && v !== 'OK',
 }
+
+// All six components are mandatory — submission is blocked unless each has a status.
+const REQUIRED_STATUSES = [
+  'status_air_terminal',
+  'status_down_conductor',
+  'status_grounding',
+  'status_spd',
+  'status_bonding',
+  'status_shielding',
+]
 
 function AHIChip({ ahi }) {
   if (ahi == null) return null
@@ -93,8 +104,8 @@ export default function LogbookForm() {
   const [assets, setAssets] = useState([])
   const [selectedAssetId, setSelectedAssetId] = useState(location.state?.assetId || '')
   const [eventId, setEventId] = useState(location.state?.eventId || '')
-  const [showOptional, setShowOptional] = useState(false)
   const [result, setResult] = useState(null)
+  const [formError, setFormError] = useState('')
   const [photos, setPhotos] = useState([]) // [{blob: Blob, previewUrl: string}]
   const [existingPhotos, setExistingPhotos] = useState([]) // [{photo_id, image, caption}]
   const [sourceLog, setSourceLog] = useState(null) // log being edited/amended
@@ -108,7 +119,7 @@ export default function LogbookForm() {
     status_spd: 'OK',
     arus_bocor_spd_ma: '',
     status_bonding: '',
-    status_kabel_instalasi: '',
+    status_shielding: '',
     catatan_teknisi: '',
     tgl_inspeksi: new Date().toISOString().slice(0, 16),
     user: '',
@@ -142,7 +153,7 @@ export default function LogbookForm() {
           status_spd: log.status_spd || '',
           arus_bocor_spd_ma: log.arus_bocor_spd_ma ?? '',
           status_bonding: log.status_bonding || '',
-          status_kabel_instalasi: log.status_kabel_instalasi || '',
+          status_shielding: log.status_shielding || '',
           catatan_teknisi: log.catatan_teknisi || '',
           tgl_inspeksi: isoLocal,
           user: '',
@@ -157,6 +168,7 @@ export default function LogbookForm() {
 
   const selectedAsset = assets.find((a) => a.asset_id === selectedAssetId)
   const hasIssue = Object.entries(NON_OK).some(([k, check]) => check(form[k]))
+  const missingStatuses = REQUIRED_STATUSES.filter((k) => !form[k])
   // Existing photos count toward the requirement on edit (immutable on edit; new uploads append)
   const needsPhoto = hasIssue && photos.length === 0 && existingPhotos.length === 0
 
@@ -182,6 +194,13 @@ export default function LogbookForm() {
     if (!selectedAssetId) return
     if (needsPhoto) return // guarded by disabled button too
 
+    // Hard block: all six LPS components must have a status.
+    if (missingStatuses.length > 0) {
+      setFormError('Semua komponen LPS wajib diisi. Lengkapi status untuk setiap komponen sebelum menyimpan.')
+      return
+    }
+    setFormError('')
+
     const payload = {
       asset: selectedAssetId,
       event: eventId || null,
@@ -193,7 +212,7 @@ export default function LogbookForm() {
       status_spd: form.status_spd,
       arus_bocor_spd_ma: form.arus_bocor_spd_ma ? parseFloat(form.arus_bocor_spd_ma) : null,
       status_bonding: form.status_bonding,
-      status_kabel_instalasi: form.status_kabel_instalasi,
+      status_shielding: form.status_shielding,
       catatan_teknisi: form.catatan_teknisi,
     }
 
@@ -343,13 +362,13 @@ export default function LogbookForm() {
           </div>
         </div>
 
-        {/* Required components */}
+        {/* LPS Eksternal — IEC 62305-3 (AT, DC, GR) */}
         <div className="card space-y-5">
-          <h2 className="font-semibold text-gray-700">Komponen Wajib</h2>
+          <h2 className="font-semibold text-gray-700">LPS Eksternal</h2>
 
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <p className="text-sm font-medium text-gray-700">🔩 Air Terminal</p>
+              <p className="text-sm font-medium text-gray-700">🔩 Air Terminal <span className="text-red-500">*</span></p>
               <AHIChip ahi={selectedAsset?.ahi_breakdown?.per_component?.AT?.ahi} />
             </div>
             <RadioCards
@@ -360,7 +379,7 @@ export default function LogbookForm() {
           </div>
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <p className="text-sm font-medium text-gray-700">🔧 Down Conductor</p>
+              <p className="text-sm font-medium text-gray-700">🔧 Down Conductor <span className="text-red-500">*</span></p>
               <AHIChip ahi={selectedAsset?.ahi_breakdown?.per_component?.DC?.ahi} />
             </div>
             <RadioCards
@@ -371,7 +390,7 @@ export default function LogbookForm() {
           </div>
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <p className="text-sm font-medium text-gray-700">⚡ Grounding</p>
+              <p className="text-sm font-medium text-gray-700">⚡ Grounding <span className="text-red-500">*</span></p>
               <AHIChip ahi={selectedAsset?.ahi_breakdown?.per_component?.GR?.ahi} />
             </div>
             <RadioCards
@@ -391,9 +410,15 @@ export default function LogbookForm() {
               onChange={(e) => setField('resistansi_grounding_ohm')(e.target.value)}
             />
           </div>
+        </div>
+
+        {/* LPS Internal — IEC 62305-4 (SPD, Bonding, Shielding) */}
+        <div className="card space-y-5">
+          <h2 className="font-semibold text-gray-700">LPS Internal</h2>
+
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <p className="text-sm font-medium text-gray-700">🛡️ SPD / Arester</p>
+              <p className="text-sm font-medium text-gray-700">🛡️ SPD / Arester <span className="text-red-500">*</span></p>
               <AHIChip ahi={selectedAsset?.ahi_breakdown?.per_component?.SPD?.ahi} />
             </div>
             <p className="text-xs text-gray-400 mb-2">Arester Tipe 1 (LPS Internal) di dekat grounding — wajib per IEC 62305-4.</p>
@@ -411,33 +436,28 @@ export default function LogbookForm() {
               onChange={(e) => setField('arus_bocor_spd_ma')(e.target.value)}
             />
           </div>
-        </div>
-
-        {/* Optional components */}
-        <div className="card space-y-4">
-          <button
-            type="button"
-            className="flex items-center gap-2 font-semibold text-gray-700 w-full text-left"
-            onClick={() => setShowOptional((v) => !v)}
-          >
-            Komponen LPS Internal — Bonding & Kabel {showOptional ? '▲' : '▼'}
-          </button>
-          {showOptional && (
-            <div className="space-y-4 pt-2 border-t">
-              <div>
-                <p className="text-sm font-medium text-gray-700 mb-2">Bonding (Ekuipotensial)</p>
-                <select className="form-input" value={form.status_bonding} onChange={(e) => setField('status_bonding')(e.target.value)}>
-                  {COMPONENT_OPTIONS.bonding.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-gray-700 mb-2">Kabel Instalasi</p>
-                <select className="form-input" value={form.status_kabel_instalasi} onChange={(e) => setField('status_kabel_instalasi')(e.target.value)}>
-                  {COMPONENT_OPTIONS.kabel.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </div>
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <p className="text-sm font-medium text-gray-700">🔗 Bonding (Ekuipotensial) <span className="text-red-500">*</span></p>
+              <AHIChip ahi={selectedAsset?.ahi_breakdown?.per_component?.BND?.ahi} />
             </div>
-          )}
+            <RadioCards
+              options={COMPONENT_OPTIONS.bonding}
+              value={form.status_bonding}
+              onChange={setField('status_bonding')}
+            />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <p className="text-sm font-medium text-gray-700">🧲 Shielding <span className="text-red-500">*</span></p>
+              <AHIChip ahi={selectedAsset?.ahi_breakdown?.per_component?.SHD?.ahi} />
+            </div>
+            <RadioCards
+              options={COMPONENT_OPTIONS.shielding}
+              value={form.status_shielding}
+              onChange={setField('status_shielding')}
+            />
+          </div>
         </div>
 
         {/* Evidence */}
@@ -531,6 +551,12 @@ export default function LogbookForm() {
           </div>
         </div>
 
+        {formError && (
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm">
+            {formError}
+          </div>
+        )}
+
         <button
           type="submit"
           className="btn-primary w-full py-3"
@@ -538,6 +564,7 @@ export default function LogbookForm() {
             isSubmitting
             || !selectedAssetId
             || needsPhoto
+            || missingStatuses.length > 0
             || (!isOnline && mode !== 'create')
           }
         >

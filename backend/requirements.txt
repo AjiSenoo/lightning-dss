@@ -11,4 +11,6 @@ networkx==3.6.1
 packaging==26.0
 python-dotenv==1.2.2
 Pillow==12.2.0
+weasyprint==62.3
+pydyf==0.10.0
 gunicorn==23.0.0

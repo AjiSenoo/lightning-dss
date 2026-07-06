@@ -57,7 +57,11 @@ def recommend_for_component(
     # --- Rule 1: hard-fail status overrides everything (immediate replace) ---
     # The latest inspection status rides along in ahi_result (set by
     # calculate_component_ahi). A confirmed functional failure is an immediate
-    # replacement trigger (IEC 62305-3:2010 Clause 7), independent of fuzzy urgency.
+    # replacement trigger (IEC 62305-3:2010 Clause 7 / IEC 62305-4 Cl.5),
+    # independent of fuzzy urgency. This generic path covers the internal-LPS
+    # components with no dedicated numeric rule below — BND ('Terputus') and
+    # SHD ('Terputus', open/discontinuous shield per IEC 62305-4 Cl.5.2) — whose
+    # lifespan/age pressure is otherwise folded into the fuzzy urgency branch.
     status = ahi_result.get('latest_status')
     if status in cfg.HARD_FAIL_STATUSES.get(component_type, set()):
         return _recommendation(

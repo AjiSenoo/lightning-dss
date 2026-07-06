@@ -35,7 +35,7 @@ TRACKED_FIELDS = [
     'status_air_terminal', 'status_down_conductor', 'status_grounding',
     'resistansi_grounding_ohm',
     'status_spd', 'arus_bocor_spd_ma',
-    'status_bonding', 'status_kabel_instalasi',
+    'status_bonding', 'status_shielding',
     'catatan_teknisi',
 ]
 
@@ -54,6 +54,156 @@ def _compute_diff(before, after):
                 'new': None if av is None else str(av),
             }
     return diff
+
+
+def _status_badge(component_type, status_value):
+    """Map a component status to a PDF badge CSS class."""
+    from fuzzy_engine import fuzzy_config as cfg
+    if not status_value:
+        return 'badge-neutral'
+    if status_value == 'OK':
+        return 'badge-ok'
+    if status_value in cfg.HARD_FAIL_STATUSES.get(component_type, set()):
+        return 'badge-bad'
+    return 'badge-warn'
+
+
+# Human-readable Indonesian phrasing for recommendation engine outputs.
+_REC_ACTION_ID = {
+    'replace': 'Ganti',
+    'repair':  'Perbaiki',
+    'inspect': 'Inspeksi',
+    'monitor': 'Pantau',
+}
+_REC_HORIZON_ID = {
+    'immediate':       'segera',
+    'within_1_month':  'dalam 1 bulan',
+    'within_6_months': 'dalam 6 bulan',
+    'next_cycle':      'pada siklus berikutnya',
+}
+
+
+def _rec_sentence(rec, component_labels):
+    """Turn one recommendation dict into an Indonesian sentence."""
+    ct = rec.get('component_type', '')
+    label = component_labels.get(ct, ct)
+    action = _REC_ACTION_ID.get(rec.get('action'), rec.get('action', ''))
+    horizon = _REC_HORIZON_ID.get(rec.get('time_horizon'), rec.get('time_horizon', ''))
+    urgency = rec.get('urgency_label', '')
+    return f'{label}: {action} {horizon} ({urgency}).'
+
+
+def _render_inspection_pdf_html(log):
+    """Build the HTML string for an inspection's PDF report."""
+    from django.template.loader import render_to_string
+    from core.models import COMPONENT_TYPE_CHOICES
+
+    component_labels = dict(COMPONENT_TYPE_CHOICES)
+    component_labels['GR'] = 'Grounding'  # display label per project convention
+    asset = log.asset
+
+    def _row(component_type, label, status_value, status_display, extra=''):
+        return {
+            'label': label,
+            'status': status_display or status_value or '-',
+            'badge': _status_badge(component_type, status_value),
+            'extra': extra,
+        }
+
+    gr_extra = ''
+    if log.resistansi_grounding_ohm is not None:
+        gr_extra = f'Resistansi: {log.resistansi_grounding_ohm} Ω'
+    spd_extra = ''
+    if log.arus_bocor_spd_ma is not None:
+        spd_extra = f'Arus bocor: {log.arus_bocor_spd_ma} mA'
+
+    eksternal = [
+        _row('AT', 'Air Terminal', log.status_air_terminal, log.get_status_air_terminal_display()),
+        _row('DC', 'Down Conductor', log.status_down_conductor, log.get_status_down_conductor_display()),
+        _row('GR', 'Grounding', log.status_grounding, log.get_status_grounding_display(), gr_extra),
+    ]
+    internal = [
+        _row('SPD', 'Surge Protective Device (SPD)', log.status_spd, log.get_status_spd_display(), spd_extra),
+        _row('BND', 'Equipotential Bonding', log.status_bonding, log.get_status_bonding_display()),
+        _row('SHD', 'Spatial Shielding', log.status_shielding, log.get_status_shielding_display()),
+    ]
+
+    # Overall health + recommendations (reuse the asset's cached breakdown).
+    health_percent = health_safety_percent = '-'
+    worst_component = ''
+    headline = ''
+    recommendations = []
+    try:
+        health = asset.cached_health()
+        if health:
+            health_percent = round(health.get('ahi_overall', 0.0) * 100)
+            health_safety_percent = round(health.get('ahi_safety', 0.0) * 100)
+            worst_ct = health.get('worst_component')
+            if worst_ct:
+                worst_component = component_labels.get(worst_ct, worst_ct)
+
+            from fuzzy_engine import run_inference_per_component, recommend_for_asset
+            from fuzzy_engine import fuzzy_config as cfg
+            per_ahi = dict(health.get('per_component', {}))
+            ahi_by_type = {ct: r['ahi'] for ct, r in per_ahi.items()}
+            latest_event = asset.events.first()
+            r_stress = latest_event.rasio_stres if latest_event else 0.0
+            incidental = bool(latest_event and latest_event.kategori_magnitudo == cfg.INCIDENTAL_TRIGGER_MAGNITUDE)
+            fuzzy = run_inference_per_component(r_stress, ahi_by_type)
+
+            def _latest_measurement(component_type):
+                comp = asset.components.filter(
+                    component_type=component_type, end_date__isnull=True, deleted_at__isnull=True
+                ).first()
+                if comp is None:
+                    return None
+                return (
+                    comp.status_history
+                    .order_by('-inspection__tgl_inspeksi')
+                    .values_list('measurement', flat=True)
+                    .first()
+                )
+
+            rec_result = recommend_for_asset(
+                per_ahi,
+                fuzzy['per_component'],
+                latest_measurements={'GR': _latest_measurement('GR'), 'SPD': _latest_measurement('SPD')},
+                incidental=incidental,
+            )
+            if rec_result.get('headline'):
+                headline = _rec_sentence(rec_result['headline'], component_labels)
+            recommendations = [
+                _rec_sentence(r, component_labels)
+                for r in rec_result.get('per_component', [])
+                if r.get('action') != 'monitor'
+            ]
+    except Exception:
+        logger.exception('PDF health/recommendation build failed for inspection %s', log.pk)
+
+    verification_status = 'pending'
+    if log.verified_at:
+        verification_status = 'verified'
+    elif log.revision_requested_at:
+        verification_status = 'revision_requested'
+
+    context = {
+        'asset': asset,
+        'org_nama': asset.organization.nama if asset.organization_id else '',
+        'tgl_inspeksi': timezone.localtime(log.tgl_inspeksi).strftime('%d %B %Y, %H:%M') if log.tgl_inspeksi else '-',
+        'inspector_nama': (log.user.nama_lengkap or log.user.username) if log.user_id else '',
+        'verification_status': verification_status,
+        'verified_by_nama': (log.verified_by.nama_lengkap or log.verified_by.username) if log.verified_by_id else '',
+        'eksternal': eksternal,
+        'internal': internal,
+        'health_percent': health_percent,
+        'health_safety_percent': health_safety_percent,
+        'worst_component': worst_component,
+        'headline': headline,
+        'recommendations': recommendations,
+        'catatan_teknisi': log.catatan_teknisi,
+        'generated_at': timezone.localtime(timezone.now()).strftime('%d %B %Y, %H:%M'),
+    }
+    return render_to_string('inspection_report_pdf.html', context)
 
 
 def _user_org(request):
@@ -514,10 +664,16 @@ class InspectionViewSet(viewsets.ModelViewSet):
         if date_to:
             qs = qs.filter(tgl_inspeksi__lte=date_to)
         if params.get('issues_only', '').lower() in ('true', '1', 'yes'):
+            # "Hanya yang bermasalah" — any degrading component (Eksternal AT/DC/GR +
+            # Internal SPD/BND/SHD) not OK. SPD/Bonding/Shielding are now mandatory scored
+            # components, so a fault in any of them counts as an issue.
             qs = qs.filter(
                 ~Q(status_air_terminal='OK')
                 | ~Q(status_down_conductor='OK')
                 | ~Q(status_grounding='OK')
+                | ~Q(status_spd='OK')
+                | ~Q(status_bonding='OK')
+                | ~Q(status_shielding='OK')
             )
         verification = params.get('verification')
         if verification == 'verified':
@@ -828,6 +984,32 @@ class InspectionViewSet(viewsets.ModelViewSet):
         log = self.get_object()
         rows = log.audit_trail.select_related('actor').all()
         return Response(InspectionLogAuditSerializer(rows, many=True).data)
+
+    @action(detail=True, methods=['get'])
+    def pdf(self, request, pk=None):
+        """
+        Download this inspection as a server-rendered PDF document.
+        GET /inspections/{id}/pdf/ → application/pdf attachment.
+        Auth/org-scoping/soft-delete rules are inherited via get_object().
+        """
+        log = self.get_object()
+        html = _render_inspection_pdf_html(log)
+        try:
+            from weasyprint import HTML
+            pdf_bytes = HTML(string=html).write_pdf()
+        except OSError:
+            logger.exception('WeasyPrint PDF render failed (missing system libs?) for inspection %s', log.pk)
+            return Response(
+                {'detail': 'Gagal membuat PDF: pustaka sistem PDF (Pango/Cairo) tidak tersedia di server.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        from django.http import HttpResponse
+        gedung = (log.asset.nama_gedung or 'Aset').replace(' ', '_')
+        tgl = timezone.localtime(log.tgl_inspeksi).strftime('%Y-%m-%d') if log.tgl_inspeksi else 'tanpa-tanggal'
+        filename = f'Laporan_Inspeksi_{gedung}_{tgl}.pdf'
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
     @action(detail=True, methods=['post'])
     def amend(self, request, pk=None):

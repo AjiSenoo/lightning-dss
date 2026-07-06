@@ -68,10 +68,10 @@ BONDING_STATUS = [
     ('Terputus', 'Terputus'),
 ]
 
-CABLE_STATUS = [
+SHIELDING_STATUS = [
     ('OK', 'OK'),
-    ('Terkelupas', 'Terkelupas'),
-    ('Terbakar', 'Terbakar'),
+    ('Terkorosi', 'Terkorosi'),
+    ('Terputus', 'Terputus'),
 ]
 
 ROLE_CHOICES = [
@@ -86,6 +86,7 @@ COMPONENT_TYPE_CHOICES = [
     ('GR',  'Grounding Electrode'),
     ('BND', 'Equipotential Bonding'),
     ('SPD', 'Surge Protective Device'),
+    ('SHD', 'Spatial Shielding'),
     ('EQP', 'Protected Equipment'),
 ]
 
@@ -98,6 +99,7 @@ COMPONENT_STATUS_CHOICES_BY_TYPE = {
     'GR':  GROUNDING_STATUS,
     'BND': BONDING_STATUS,
     'SPD': SPD_STATUS,
+    'SHD': SHIELDING_STATUS,
 }
 
 MAINTENANCE_ACTION_CHOICES = [
@@ -156,7 +158,7 @@ class AssetRegistry(models.Model):
         # Prefer the precise install date; fall back to Jan 1 of the install year for
         # legacy/year-only registrations where the exact day is unknown.
         install_date = self.tanggal_instalasi or datetime.date(self.tahun_instalasi, 1, 1)
-        for ct in ('AT', 'DC', 'GR', 'BND', 'SPD', 'EQP'):
+        for ct in ('AT', 'DC', 'GR', 'BND', 'SPD', 'SHD', 'EQP'):
             exists = self.components.filter(
                 component_type=ct, end_date__isnull=True, deleted_at__isnull=True
             ).exists()
@@ -303,18 +305,19 @@ class InspectionLog(models.Model):
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='inspections')
     tgl_inspeksi = models.DateTimeField()
 
-    # Required components (AT/DC/GR + SPD arrester — mandatory per IEC 60364-5-53 where an
-    # external LPS exists; the Type-1 arrester is the internal-LPS link bonded near grounding).
+    # LPS Eksternal (IEC 62305-3): Air Terminal, Down Conductor, Grounding Electrode.
     status_air_terminal = models.CharField(max_length=20, choices=AIR_TERMINAL_STATUS)
     status_down_conductor = models.CharField(max_length=20, choices=DOWN_CONDUCTOR_STATUS)
     status_grounding = models.CharField(max_length=20, choices=GROUNDING_STATUS)
     resistansi_grounding_ohm = models.FloatField(null=True, blank=True)
-    status_spd = models.CharField(max_length=20, choices=SPD_STATUS)
 
-    # Optional components / measurements
+    # LPS Internal (IEC 62305-4): SPD (Type-1 arrester), Equipotential Bonding, Spatial Shielding.
+    # All six statuses are enforced as required at the serializer layer; the model fields stay
+    # DB-permissive (blank/default) so historical rows remain valid.
+    status_spd = models.CharField(max_length=20, choices=SPD_STATUS)
     arus_bocor_spd_ma = models.FloatField(null=True, blank=True)
     status_bonding = models.CharField(max_length=20, choices=BONDING_STATUS, blank=True, default='')
-    status_kabel_instalasi = models.CharField(max_length=20, choices=CABLE_STATUS, blank=True, default='')
+    status_shielding = models.CharField(max_length=20, choices=SHIELDING_STATUS, blank=True, default='')
 
     # Evidence
     catatan_teknisi = models.TextField(blank=True, default='')
@@ -375,6 +378,7 @@ class InspectionLog(models.Model):
             'GR':  ('status_grounding',       'resistansi_grounding_ohm'),
             'BND': ('status_bonding',         None),
             'SPD': ('status_spd',             'arus_bocor_spd_ma'),
+            'SHD': ('status_shielding',       None),
         }
         active_components = {
             c.component_type: c
