@@ -90,7 +90,7 @@ export default function AssetTrash() {
                 <tr
                   key={asset.asset_id}
                   className={`border-b last:border-b-0 hover:bg-gray-50 cursor-pointer transition-colors ${i % 2 === 1 ? 'bg-gray-50/40' : ''}`}
-                  onClick={() => navigate(`/assets/${asset.asset_id}`)}
+                  onClick={() => navigate(`/assets/${asset.asset_id}?deleted=1`)}
                 >
                   <td className="py-3 px-4 font-medium text-gray-900">{asset.nama_gedung}</td>
                   <td className="py-3 px-4 text-gray-600">

@@ -20,10 +20,16 @@ const VERB_LABELS = {
   asset_restore:    'memulihkan aset dari Tempat Sampah:',
   component_eol_warning: 'Komponen mendekati masa pakai:',
   component_eol_urgent:  'Komponen hampir habis masa pakai:',
+  component_hard_fail:   'Komponen gagal kritis:',
+  incidental_inspection: '⚡ Sambaran besar — inspeksi insidental diperlukan di',
+  periodic_inspection_due: '🗓️ Inspeksi periodik jatuh tempo untuk',
 }
 
 // System-generated notifications have no actor — render label + target only.
-const NO_ACTOR_VERBS = ['lightning', 'stale_asset', 'component_eol_warning', 'component_eol_urgent']
+const NO_ACTOR_VERBS = [
+  'lightning', 'stale_asset', 'component_eol_warning', 'component_eol_urgent',
+  'component_hard_fail', 'incidental_inspection', 'periodic_inspection_due',
+]
 
 function renderText(notif) {
   const label = VERB_LABELS[notif.verb] || notif.verb

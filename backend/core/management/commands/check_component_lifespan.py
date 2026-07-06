@@ -45,9 +45,23 @@ class Command(BaseCommand):
                 usage = age_years / lifespan_years
                 remaining_months = (lifespan_years - age_years) * 12
 
+                # SPD (Type-1 arrester) has an extra proactive-inspection trigger: re-inspect
+                # every SPD_INSPECTION_INTERVAL_YEARS OR after SPD_INSPECTION_STRIKE_COUNT strikes
+                # recorded on the asset since this SPD was installed (electronic damage propagates
+                # through the shared-earth path first). Either crossing escalates to 'warning'.
+                spd_trigger = False
+                if comp.component_type == 'SPD':
+                    strikes_since_install = comp.asset.events.filter(
+                        timestamp__date__gte=comp.install_date,
+                    ).count()
+                    spd_trigger = (
+                        age_years >= cfg.SPD_INSPECTION_INTERVAL_YEARS
+                        or strikes_since_install >= cfg.SPD_INSPECTION_STRIKE_COUNT
+                    )
+
                 if usage >= urgent_frac or remaining_months < urgent_months:
                     tier = 'urgent'
-                elif usage >= warning_frac:
+                elif usage >= warning_frac or spd_trigger:
                     tier = 'warning'
                 else:
                     continue

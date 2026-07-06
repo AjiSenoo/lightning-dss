@@ -11,6 +11,20 @@ from .models import (
 )
 
 
+def _latest_through_chain(asset, attr):
+    """Return the most recent related row (`attr` = 'events' or 'inspections'),
+    walking predecessor links so a replacement asset inherits its predecessor's
+    last strike/inspection until it accumulates its own. Capped to guard cycles."""
+    seen = 0
+    while asset is not None and seen < 20:
+        row = getattr(asset, attr).first()
+        if row:
+            return row
+        asset = asset.predecessor
+        seen += 1
+    return None
+
+
 class OrganizationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Organization
@@ -150,7 +164,7 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
         return round(1.0 - obj.skor_kesehatan_aset, 4)
 
     def get_latest_event(self, obj):
-        event = obj.events.first()
+        event = _latest_through_chain(obj, 'events')
         if event:
             return {
                 'event_id': str(event.event_id),
@@ -161,7 +175,7 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
         return None
 
     def get_latest_inspection_date(self, obj):
-        insp = obj.inspections.first()
+        insp = _latest_through_chain(obj, 'inspections')
         return insp.tgl_inspeksi if insp else None
 
     def get_ahi_breakdown(self, obj):
@@ -181,8 +195,10 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
             health = obj.cached_health()
             per_ahi = {ct: r for ct, r in health['per_component'].items()}
             ahi_by_type = {ct: r['ahi'] for ct, r in per_ahi.items()}
+            from fuzzy_engine import fuzzy_config as cfg
             latest_event = obj.events.first()
             r_stress = latest_event.rasio_stres if latest_event else 0.0
+            incidental = bool(latest_event and latest_event.kategori_magnitudo == cfg.INCIDENTAL_TRIGGER_MAGNITUDE)
             fuzzy = run_inference_per_component(r_stress, ahi_by_type)
             # Build latest per-component numeric measurements for threshold rules
             def _latest_measurement(component_type):
@@ -205,6 +221,7 @@ class AssetRegistrySerializer(serializers.ModelSerializer):
                     'GR':  _latest_measurement('GR'),   # resistance Ω
                     'SPD': _latest_measurement('SPD'),  # leakage mA
                 },
+                incidental=incidental,
             )
         except Exception:
             logger.exception('recommendations failed for asset %s', obj.pk)
@@ -215,6 +232,7 @@ class LightningEventSerializer(serializers.ModelSerializer):
     asset_nama_gedung = serializers.CharField(source='asset.nama_gedung', read_only=True)
     asset_lpl_grade = serializers.CharField(source='asset.lpl_grade', read_only=True)
     rasio_stres = serializers.FloatField(read_only=True)
+    kategori_magnitudo = serializers.CharField(read_only=True)
     fuzzy_output_score = serializers.FloatField(read_only=True)
     fuzzy_output_label = serializers.CharField(read_only=True)
     created_by_nama = serializers.CharField(source='created_by.nama_lengkap', read_only=True)
@@ -224,13 +242,13 @@ class LightningEventSerializer(serializers.ModelSerializer):
         model = LightningEvent
         fields = [
             'event_id', 'asset', 'asset_nama_gedung', 'asset_lpl_grade',
-            'timestamp', 'estimasi_arus_puncak_ka', 'rasio_stres',
+            'timestamp', 'estimasi_arus_puncak_ka', 'rasio_stres', 'kategori_magnitudo',
             'fuzzy_output_score', 'fuzzy_output_label',
             'catatan', 'created_by', 'created_by_nama', 'created_by_username', 'created_at',
         ]
         read_only_fields = [
-            'event_id', 'rasio_stres', 'fuzzy_output_score', 'fuzzy_output_label',
-            'created_by', 'created_at',
+            'event_id', 'rasio_stres', 'kategori_magnitudo', 'fuzzy_output_score',
+            'fuzzy_output_label', 'created_by', 'created_at',
         ]
 
 
@@ -416,9 +434,9 @@ class AssetMapSerializer(serializers.ModelSerializer):
         return 'aman' if band == 'hijau' else ('waspada' if band in ('oranye', 'merah') else 'bahaya')
 
     def get_last_strike(self, obj):
-        event = obj.events.first()
+        event = _latest_through_chain(obj, 'events')
         return event.timestamp if event else None
 
     def get_last_inspection(self, obj):
-        insp = obj.inspections.first()
+        insp = _latest_through_chain(obj, 'inspections')
         return insp.tgl_inspeksi if insp else None

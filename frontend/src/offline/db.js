@@ -39,11 +39,23 @@ export async function getCachedAssets() {
 export async function cacheAssets(assets) {
   const db = await getDB()
   const tx = db.transaction('assets', 'readwrite')
+  // Reconcile: keep only the current server set so soft-deleted/replaced assets don't
+  // linger as offline "ghosts" (they'd otherwise reappear in the list/map offline).
+  const liveIds = new Set(assets.map((a) => a.asset_id))
+  const existingIds = await tx.store.getAllKeys()
+  for (const key of existingIds) {
+    if (!liveIds.has(key)) await tx.store.delete(key)
+  }
   for (const asset of assets) {
     await tx.store.put(asset)
   }
   await tx.done
   await db.put('metadata', { key: 'assets_cached_at', value: Date.now() })
+}
+
+export async function removeCachedAsset(assetId) {
+  const db = await getDB()
+  await db.delete('assets', assetId)
 }
 
 export async function getCacheAge(storeName) {

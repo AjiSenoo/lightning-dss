@@ -47,6 +47,7 @@ DOWN_CONDUCTOR_STATUS = [
     ('Klem_Lepas', 'Klem Lepas'),
     ('Bengkok', 'Bengkok'),
     ('Putus', 'Putus'),
+    ('TK_Rusak', 'Termination Kit Rusak'),  # termination kit folded into DC (hard-fail)
 ]
 
 GROUNDING_STATUS = [
@@ -133,6 +134,11 @@ class AssetRegistry(models.Model):
     deleted_by = models.ForeignKey(
         'User', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='assets_deleted'
+    )
+    predecessor = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='successors',
+        help_text="The asset this one replaced; used to inherit strike/inspection history.",
     )
 
     def save(self, *args, **kwargs):
@@ -233,6 +239,9 @@ class LightningEvent(models.Model):
     timestamp = models.DateTimeField()
     estimasi_arus_puncak_ka = models.FloatField(help_text="Ipeak in kA")
     rasio_stres = models.FloatField(editable=False, default=0.0, help_text="Auto: Ipeak / kapasitas_desain_ka")
+    kategori_magnitudo = models.CharField(
+        max_length=15, editable=False, blank=True, default='',
+        help_text="Auto absolute-kA band: kecil | sedang_kecil | sedang | besar")
     fuzzy_output_score = models.FloatField(null=True, blank=True, help_text="IUI 0-100")
     fuzzy_output_label = models.CharField(max_length=30, blank=True, default='')
     catatan = models.TextField(blank=True, default='')
@@ -248,6 +257,12 @@ class LightningEvent(models.Model):
                 self.rasio_stres = self.estimasi_arus_puncak_ka / capacity
             except Exception:
                 self.rasio_stres = 0.0
+        # Absolute-magnitude label (independent of the ratio engine) for display + scheduling.
+        try:
+            from fuzzy_engine import fuzzy_config as _cfg
+            self.kategori_magnitudo = _cfg.classify_magnitude_ka(self.estimasi_arus_puncak_ka)
+        except Exception:
+            self.kategori_magnitudo = ''
         super().save(*args, **kwargs)
         try:
             self.asset.recompute_health()
@@ -288,14 +303,15 @@ class InspectionLog(models.Model):
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='inspections')
     tgl_inspeksi = models.DateTimeField()
 
-    # Required components
+    # Required components (AT/DC/GR + SPD arrester — mandatory per IEC 60364-5-53 where an
+    # external LPS exists; the Type-1 arrester is the internal-LPS link bonded near grounding).
     status_air_terminal = models.CharField(max_length=20, choices=AIR_TERMINAL_STATUS)
     status_down_conductor = models.CharField(max_length=20, choices=DOWN_CONDUCTOR_STATUS)
     status_grounding = models.CharField(max_length=20, choices=GROUNDING_STATUS)
     resistansi_grounding_ohm = models.FloatField(null=True, blank=True)
+    status_spd = models.CharField(max_length=20, choices=SPD_STATUS)
 
-    # Optional components
-    status_spd = models.CharField(max_length=20, choices=SPD_STATUS, blank=True, default='')
+    # Optional components / measurements
     arus_bocor_spd_ma = models.FloatField(null=True, blank=True)
     status_bonding = models.CharField(max_length=20, choices=BONDING_STATUS, blank=True, default='')
     status_kabel_instalasi = models.CharField(max_length=20, choices=CABLE_STATUS, blank=True, default='')
@@ -479,6 +495,8 @@ NOTIFICATION_VERBS = [
     ('component_eol_warning', 'Komponen mendekati masa pakai'),
     ('component_eol_urgent',  'Komponen hampir habis masa pakai'),
     ('component_hard_fail',   'Komponen gagal kritis'),
+    ('incidental_inspection', 'Inspeksi insidental (sambaran besar)'),
+    ('periodic_inspection_due', 'Inspeksi periodik jatuh tempo'),
 ]
 
 

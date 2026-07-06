@@ -9,8 +9,8 @@ const NON_OK = {
   status_air_terminal:   (v) => v !== 'OK',
   status_down_conductor: (v) => v !== 'OK',
   status_grounding:      (v) => v !== 'OK',
+  status_spd:            (v) => v !== 'OK',
   status_bonding:        (v) => v !== '' && v !== 'OK',
-  status_spd:            (v) => v !== '' && v !== 'OK',
 }
 
 function AHIChip({ ahi }) {
@@ -105,7 +105,7 @@ export default function LogbookForm() {
     status_down_conductor: 'OK',
     status_grounding: 'OK',
     resistansi_grounding_ohm: '',
-    status_spd: '',
+    status_spd: 'OK',
     arus_bocor_spd_ma: '',
     status_bonding: '',
     status_kabel_instalasi: '',
@@ -391,6 +391,26 @@ export default function LogbookForm() {
               onChange={(e) => setField('resistansi_grounding_ohm')(e.target.value)}
             />
           </div>
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <p className="text-sm font-medium text-gray-700">🛡️ SPD / Arester</p>
+              <AHIChip ahi={selectedAsset?.ahi_breakdown?.per_component?.SPD?.ahi} />
+            </div>
+            <p className="text-xs text-gray-400 mb-2">Arester Tipe 1 (LPS Internal) di dekat grounding — wajib per IEC 62305-4.</p>
+            <RadioCards
+              options={COMPONENT_OPTIONS.spd}
+              value={form.status_spd}
+              onChange={setField('status_spd')}
+            />
+            <input
+              type="number"
+              className="form-input mt-2"
+              placeholder="Arus bocor SPD (mA) — opsional"
+              step="0.01"
+              value={form.arus_bocor_spd_ma}
+              onChange={(e) => setField('arus_bocor_spd_ma')(e.target.value)}
+            />
+          </div>
         </div>
 
         {/* Optional components */}
@@ -400,20 +420,10 @@ export default function LogbookForm() {
             className="flex items-center gap-2 font-semibold text-gray-700 w-full text-left"
             onClick={() => setShowOptional((v) => !v)}
           >
-            Komponen LPS Internal — SPD & Bonding {showOptional ? '▲' : '▼'}
+            Komponen LPS Internal — Bonding & Kabel {showOptional ? '▲' : '▼'}
           </button>
           {showOptional && (
             <div className="space-y-4 pt-2 border-t">
-              <div>
-                <p className="text-sm font-medium text-gray-700 mb-2">SPD (Surge Protective Device)</p>
-                <select className="form-input" value={form.status_spd} onChange={(e) => setField('status_spd')(e.target.value)}>
-                  {COMPONENT_OPTIONS.spd.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-                {form.status_spd && (
-                  <input type="number" className="form-input mt-2" placeholder="Arus bocor (mA)" step="0.01"
-                    value={form.arus_bocor_spd_ma} onChange={(e) => setField('arus_bocor_spd_ma')(e.target.value)} />
-                )}
-              </div>
               <div>
                 <p className="text-sm font-medium text-gray-700 mb-2">Bonding (Ekuipotensial)</p>
                 <select className="form-input" value={form.status_bonding} onChange={(e) => setField('status_bonding')(e.target.value)}>

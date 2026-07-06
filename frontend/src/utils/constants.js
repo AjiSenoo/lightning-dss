@@ -47,6 +47,28 @@ export const getHealthStatusKey = (score) => {
   return 'bahaya'
 }
 
+// Absolute kA magnitude classification — label layer mirroring backend
+// fuzzy_config.MAGNITUDE_KA_BANDS (validasi pakar + CIGRE TB 549 median ~31 kA).
+// This is a display/context layer only; it does NOT touch the stress-ratio physics.
+export const DAMAGE_ONSET_KA = 30            // kerusakan umumnya > 30 kA (poin 3)
+export const MAGNITUDE_REF = { min: 3, max: 150, prob: 0.98 } // 3–150 kA = 98% sambaran (poin 1)
+
+const MAGNITUDE_BANDS = [
+  { key: 'kecil',        label: 'Kecil',        color: '#22C55E', min: 0,  max: 10 },
+  { key: 'sedang_kecil', label: 'Sedang Kecil', color: '#FDE047', min: 10, max: 30 },
+  { key: 'sedang',       label: 'Sedang',       color: '#FB923C', min: 30, max: 50 },
+  { key: 'besar',        label: 'Besar',        color: '#EF4444', min: 50, max: Infinity },
+]
+
+export const classifyMagnitudeKa = (ipeak) => {
+  const v = Number(ipeak)
+  if (ipeak === null || ipeak === undefined || Number.isNaN(v)) {
+    return { key: 'neutral', label: '—', color: '#9CA3AF' }
+  }
+  const band = MAGNITUDE_BANDS.find((b) => v >= b.min && v < b.max) || MAGNITUDE_BANDS[MAGNITUDE_BANDS.length - 1]
+  return { key: band.key, label: band.label, color: band.color }
+}
+
 export const LPL_LABELS = {
   'I':   'LPL I (200 kA)',
   'II':  'LPL II (150 kA)',
@@ -68,6 +90,7 @@ export const COMPONENT_OPTIONS = {
     { value: 'Klem_Lepas', label: 'Klem Lepas' },
     { value: 'Bengkok', label: 'Bengkok' },
     { value: 'Putus', label: 'Putus' },
+    { value: 'TK_Rusak', label: 'Termination Kit Rusak' },
   ],
   grounding: [
     { value: 'OK', label: 'OK' },
@@ -75,7 +98,6 @@ export const COMPONENT_OPTIONS = {
     { value: 'Terkorosi', label: 'Terkorosi' },
   ],
   spd: [
-    { value: '', label: 'Tidak Diperiksa' },
     { value: 'OK', label: 'OK' },
     { value: 'Degraded', label: 'Degraded' },
     { value: 'Failed', label: 'Failed' },

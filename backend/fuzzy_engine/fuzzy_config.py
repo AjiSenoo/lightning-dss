@@ -63,6 +63,53 @@ REFERENCE_DAMAGE_THRESHOLD = 10.0
 DESIGN_LIFESPAN_YEARS = 25
 
 # ---------------------------------------------------------------
+# Absolute Peak-Current Magnitude Classification (kA)
+# ---------------------------------------------------------------
+# This is a HUMAN-INTERPRETATION LABEL LAYER, independent of the ratio-based
+# damage/fuzzy engine (STRESS_* above). It categorises the raw stroke current in
+# absolute kA for tropical Indonesia per field-expert validation (LPS practitioner):
+#   Kecil <10 kA · Sedang Kecil 10–<30 · Sedang 30–<50 (onset kerusakan >30 kA) · Besar ≥50.
+# The 10–15 kA gap the expert left implicit is placed in 'sedang_kecil' (its lower ramp).
+# Reference: 3–150 kA spans ~98% of natural cloud-to-ground strokes (log-normal
+# distribution, CIGRE TB 549 §3, median first-stroke ≈ 31 kA — consistent with the
+# 30 kA damage-onset the expert reports). Used for display + incidental scheduling
+# only; it does NOT feed per_event_damage() or the R_stress membership functions.
+MAGNITUDE_KA_BANDS = [
+    # (label_key, lower_kA_inclusive, upper_kA_exclusive)
+    ('kecil',        0.0,  10.0),
+    ('sedang_kecil', 10.0, 30.0),
+    ('sedang',       30.0, 50.0),
+    ('besar',        50.0, 1e9),
+]
+MAGNITUDE_LABELS = {
+    'kecil':        'Kecil',
+    'sedang_kecil': 'Sedang Kecil',
+    'sedang':       'Sedang',
+    'besar':        'Besar',
+}
+DAMAGE_ONSET_KA = 30.0             # kerusakan biasanya muncul di atas ~30 kA (validasi pakar)
+MAGNITUDE_REF_RANGE_KA = (3.0, 150.0)   # rentang yang mencakup ~98% sambaran
+MAGNITUDE_REF_PROBABILITY = 0.98
+INCIDENTAL_TRIGGER_MAGNITUDE = 'besar'  # sambaran 'besar' memicu inspeksi insidental
+
+
+def classify_magnitude_ka(ipeak_ka):
+    """Return the absolute-magnitude band key ('kecil'|'sedang_kecil'|'sedang'|'besar')
+    for a stroke peak current in kA. Returns '' for missing/non-positive input."""
+    if ipeak_ka is None:
+        return ''
+    try:
+        val = float(ipeak_ka)
+    except (TypeError, ValueError):
+        return ''
+    if val <= 0:
+        return ''
+    for label, lo, hi in MAGNITUDE_KA_BANDS:
+        if lo <= val < hi:
+            return label
+    return MAGNITUDE_KA_BANDS[-1][0]  # >= last lower bound → highest band
+
+# ---------------------------------------------------------------
 # LPL Design Capacity Map (kA)  [legacy — kept for backward compat]
 # ---------------------------------------------------------------
 
@@ -107,21 +154,31 @@ DAMAGE_EXPONENT = {
 
 # Aggregation weights for "Overall Health" (AHI_overall) trending number.
 # Weights must sum to 1.0 across the five degrading components (EQP excluded: weight 0).
-# External LPS (AT+DC+GR = 0.72) stays dominant as the primary current-conduction path;
-# GR heaviest (0.28) — most-frequent failure in Indonesian tropical soils (IEC 62305-2 R1).
-# SPD (0.16) weighted above BND (0.12): sacrificial MOV ages faster than bonding conductors.
-# Source: engineering estimate anchored on SNI 03-7015-2004 inspection priorities,
-# IEC 61643-12 SPD aging guidance, and CIGRE TB 858 "choose to suit the application".
-# Flag for thesis: weights are engineering estimates — AHP formalisation is recommended
-# future work (as already noted in Bab VII Saran).
+# Re-weighted per field-expert validation (LPS practitioner, Indonesia): the Air Terminal
+# and the termination kit (folded into DC as the DC 'TK_Rusak' hard-fail) are reported as
+# the MOST FREQUENTLY DAMAGED components in the field, so AT (0.28) and DC (0.26) lead.
+# GR lowered to 0.20: still safety-relevant (SNI 03-7015-2004 ≤5 Ω) but not the most
+# frequent failure per practitioner experience. SPD (0.16) kept above BND (0.10): the
+# sacrificial MOV (Type-1 arrester, internal LPS) ages fastest and is where electronic
+# damage propagates ("jangkauan sampai internal LPS"). External LPS (AT+DC+GR = 0.74)
+# stays dominant as the primary current-conduction path.
+# Source: field-practitioner validation (interpretasi persentase dibuat sendiri), anchored
+# on SNI 03-7015-2004 inspection priorities and CIGRE TB 858 "choose to suit the application".
+# Flag for thesis: weights are practitioner-informed engineering estimates — AHP
+# formalisation is recommended future work (Bab VII Saran). MUST match Bab IV justification.
 COMPONENT_WEIGHTS = {
-    'AT':  float(os.getenv('W_COMPONENT_AT',  '0.22')),
-    'DC':  float(os.getenv('W_COMPONENT_DC',  '0.22')),
-    'GR':  float(os.getenv('W_COMPONENT_GR',  '0.28')),
-    'BND': float(os.getenv('W_COMPONENT_BND', '0.12')),
+    'AT':  float(os.getenv('W_COMPONENT_AT',  '0.28')),
+    'DC':  float(os.getenv('W_COMPONENT_DC',  '0.26')),
+    'GR':  float(os.getenv('W_COMPONENT_GR',  '0.20')),
+    'BND': float(os.getenv('W_COMPONENT_BND', '0.10')),
     'SPD': float(os.getenv('W_COMPONENT_SPD', '0.16')),
     'EQP': 0.0,  # sink node — excluded from overall health
 }
+# Guard: overall-health weights (excluding EQP sink) must sum to 1.0.
+_component_weight_sum = sum(v for k, v in COMPONENT_WEIGHTS.items() if k != 'EQP')
+assert abs(_component_weight_sum - 1.0) < 1e-6, (
+    f'COMPONENT_WEIGHTS (excl. EQP) must sum to 1.0, got {_component_weight_sum:.6f}'
+)
 
 # Design lifespan per component type (years since install/last replacement),
 # selected by SITE_CLIMATE_PROFILE. Temperate baseline:
@@ -164,13 +221,32 @@ DESIGN_LIFESPAN_BY_COMPONENT = {
 # GR_RESISTANCE_REPLACE_THRESHOLD_OHM).
 # 'Terputus' for BND: open bonding conductor per IEC 62305-3 Cl.5.4 failure criterion.
 # 'Failed' for SPD: MOV device destroyed; no protective function (IEC 61643-11 Cl.7).
+# 'TK_Rusak' for DC: the termination kit (bonding/clamp assembly joining the down
+# conductor to the air-termination and to earth) is folded into DC per the Indonesian
+# component taxonomy AT / (DC + termination kit) / GR. A damaged termination kit breaks
+# the down-conductor current path — functionally equivalent to 'Putus' (open conductor),
+# so it is a DC hard-fail. Practitioners report AT + termination kit as the most
+# frequently damaged parts (reflected in COMPONENT_WEIGHTS).
 HARD_FAIL_STATUSES = {
     'AT':  {'Meleleh', 'Rusak'},
-    'DC':  {'Putus'},
+    'DC':  {'Putus', 'TK_Rusak'},
     'GR':  {'High_Resistance'},
     'BND': {'Terputus'},
     'SPD': {'Failed'},
 }
+
+# SPD (Type-1 surge arrester) proactive-inspection triggers — see check_component_lifespan.
+# The arrester is internal LPS at the LPZ0/LPZ1 boundary (service entrance), bonded to the
+# Main Earthing Terminal / equipotential bonding bar together with the grounding electrode
+# (IEC 62305-4 Cl.5.3 & 5.4; IEC 61643-11 Type 1; mandatory where an external LPS exists per
+# IEC 60364-5-53). Field practice: re-inspect every 5 years OR after ~25 recorded strikes,
+# because electronic damage propagates through this shared-earth path first.
+SPD_INSPECTION_INTERVAL_YEARS = int(os.getenv('SPD_INSPECTION_INTERVAL_YEARS', '5'))
+SPD_INSPECTION_STRIKE_COUNT   = int(os.getenv('SPD_INSPECTION_STRIKE_COUNT', '25'))
+
+# Periodic (calendar) inspection cadence for 'besar'-strike-exposed assets: biyearly =
+# twice a year (semiannual). Complements the condition-based engine with a baseline cycle.
+PERIODIC_INSPECTION_MONTHS = int(os.getenv('PERIODIC_INSPECTION_MONTHS', '6'))
 
 # SNI 03-7015-2004 §6.5.7 and PUIL 2011 require grounding resistance <= 5 ohm for
 # lightning-protection installations in Indonesia; above this, replacement is required.
@@ -226,6 +302,7 @@ CONDITION_FACTOR = {
     'Rusak': 0.00,
     'Meleleh': 0.00,
     'Putus': 0.00,
+    'TK_Rusak': 0.00,   # DC termination kit damaged — open DC path, hard-fail like Putus
     'Terputus': 0.00,   # BND open circuit — hard-fail, same ladder position as Putus
     'Failed': 0.00,     # SPD destroyed — hard-fail per IEC 61643-11 Cl.7
     'High_Resistance': 0.00,
@@ -252,6 +329,7 @@ SEVERITY_MAP = {
     'Klem_Lepas': 0.15,
     'Bengkok': 0.25,
     'Putus': 0.4,
+    'TK_Rusak': 0.4,    # DC termination kit damaged — same tier as Putus (open DC path)
     'High_Resistance': 0.2,
     'Longgar': 0.15,    # BND loose — same severity tier as Klem_Lepas
     'Terputus': 0.4,    # BND open — same tier as Putus

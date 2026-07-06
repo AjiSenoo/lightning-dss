@@ -1,5 +1,5 @@
 import client from '../api/client'
-import { getDB, getPendingItems, updateQueueItem } from './db'
+import { getDB, getPendingItems, updateQueueItem, removeCachedAsset } from './db'
 
 const SYNC_INTERVAL_MS = 30000
 const MAX_RETRIES = 5
@@ -37,21 +37,20 @@ class SyncManager {
         return
       }
 
-      const events = pending.filter((item) => item.type === 'event')
-      const inspections = pending.filter((item) => item.type === 'inspection')
+      // Process events/inspections first (they may create the asset context), then the
+      // asset/component mutations. All queued types drain in one pass.
+      const order = { event: 0, inspection: 1, maintenance: 2, asset_edit: 3, asset_replace: 4, asset_delete: 5 }
+      const sorted = [...pending].sort((a, b) => (order[a.type] ?? 9) - (order[b.type] ?? 9))
       let synced = 0
-
-      for (const item of events) {
-        const success = await this._syncItem(item)
-        if (success) synced++
-      }
-      for (const item of inspections) {
+      for (const item of sorted) {
         const success = await this._syncItem(item)
         if (success) synced++
       }
 
-      if (this._onSyncComplete && synced > 0) {
-        this._onSyncComplete(synced)
+      if (synced > 0) {
+        if (this._onSyncComplete) this._onSyncComplete(synced)
+        // Let mounted pages (Dashboard/Portfolio/Detail) refetch after the queue drains.
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event('sync:done'))
       }
     } catch (error) {
       console.error('Sync queue processing failed:', error)
@@ -104,6 +103,28 @@ class SyncManager {
           const db = await getDB()
           await db.put('assets', serverResult.updated_asset)
         }
+      }
+
+      if (item.type === 'maintenance') {
+        await client.post('/maintenance-actions/', item.payload)
+      }
+
+      if (item.type === 'asset_edit') {
+        const response = await client.put(`/assets/${item.assetId}/`, item.payload)
+        const db = await getDB()
+        await db.put('assets', response.data)
+      }
+
+      if (item.type === 'asset_replace') {
+        const response = await client.post(`/assets/${item.assetId}/replace/`, item.payload)
+        await removeCachedAsset(item.assetId)   // old asset is now soft-deleted
+        const db = await getDB()
+        if (response.data?.asset_id) await db.put('assets', response.data)
+      }
+
+      if (item.type === 'asset_delete') {
+        await client.delete(`/assets/${item.assetId}/`)
+        await removeCachedAsset(item.assetId)
       }
 
       await updateQueueItem(item.id, { status: 'synced', syncedAt: Date.now() })

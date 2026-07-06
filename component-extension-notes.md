@@ -57,15 +57,35 @@ di mana:
 
 ### 2.2 Bobot Komponen dalam AHI Keseluruhan
 
+Bobot di-*rekalibrasi* berdasarkan validasi pakar lapangan (praktisi LPS, Indonesia):
+*Air Terminal* dan *termination kit* (dilebur ke DC) dilaporkan sebagai komponen **paling
+sering rusak** di lapangan, sehingga AT dan DC menjadi yang tertinggi. GR diturunkan (tetap
+relevan keselamatan, tetapi bukan kegagalan tersering menurut pengalaman lapangan).
+"Interpretasi persentase dibuat sendiri" — nilai adalah estimasi rekayasa berbasis pakar.
+
 | Komponen | Bobot | Justifikasi |
 |----------|-------|-------------|
-| AT  | 0,22 | LPS Eksternal, jalur primer — tetap dominan |
-| DC  | 0,22 | LPS Eksternal, jalur primer |
-| GR  | 0,28 | LPS Eksternal, terberat: mode kegagalan paling sering di tanah tropis Indonesia (IEC 62305-2 loss type R1; SNI 03-7015-2004 prioritas inspeksi) |
-| BND | 0,12 | LPS Internal; konduktor bonding lebih tahan lama dari SPD |
+| AT  | 0,28 | LPS Eksternal; **paling sering rusak** menurut pakar lapangan → bobot tertinggi |
+| DC  | 0,26 | LPS Eksternal; mencakup *termination kit* (status hard-fail `TK_Rusak`) yang juga sering rusak |
+| GR  | 0,20 | LPS Eksternal; tetap relevan keselamatan (SNI 03-7015-2004 ≤5 Ω) namun bukan kegagalan tersering |
+| BND | 0,10 | LPS Internal; konduktor bonding lebih tahan lama dari SPD |
 | SPD | 0,16 | LPS Internal; elemen sacrificial, penuaan lebih cepat (IEC 61643-12) — lebih besar dari BND |
 | EQP | 0,00 | Simpul terminal — dikecualikan dari perhitungan kesehatan |
 | **Total** | **1,00** | |
+
+> **Catatan sinkronisasi laporan:** nilai ini WAJIB cocok dengan `COMPONENT_WEIGHTS` di
+> `fuzzy_config.py` dan justifikasi Bab IV.
+
+### 2.2b Penempatan & Kewajiban SPD/Arester (IEC 62305-4)
+
+SPD kini **komponen wajib diinspeksi** (bukan opsional). SPD = *surge arrester* Tipe 1
+(IEC 61643-11, uji I_imp 10/350 µs), bagian **LPS Internal**, ditempatkan di **batas
+LPZ0/LPZ1 pada service entrance / MDB**, di-*bonding* ke **Main Earthing Terminal (MET) /
+batang ikatan ekuipotensial** yang menyatu dengan sistem pembumian (earthing bersama,
+IEC 62305-4 Klausul 5.3 & 5.4). Wajib bila terdapat LPS eksternal (IEC 60364-5-53). Karena
+"berada di dekat grounding", saat sambaran sebagian arus petir masuk lewat earthing bersama
+sehingga arester adalah titik pertama tempat kerusakan elektronik merambat ke sisi internal.
+Pemicu inspeksi proaktif SPD: **setiap 5 tahun ATAU setelah ~25 sambaran** tercatat.
 
 **Catatan jujur untuk Bab IV:** Bobot di atas merupakan estimasi rekayasa yang mengacu pada
 prioritas inspeksi SNI 03-7015-2004 dan panduan CIGRE TB 858 ("choose to suit the

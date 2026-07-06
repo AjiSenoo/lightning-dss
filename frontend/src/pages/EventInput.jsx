@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { UrgencyBadge } from '../components/StatusBadge'
+import MagnitudeBadge from '../components/MagnitudeBadge'
 import { URGENCY_ACTIONS, LPL_CAPACITY, formatDateTime } from '../utils/constants'
 import useOfflineSubmit from '../hooks/useOfflineSubmit'
 import cacheStore from '../offline/cacheStore'
@@ -122,6 +123,12 @@ export default function EventInput() {
               />
               <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">kA</span>
             </div>
+            {ipeak && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">Kategori magnitudo (kA absolut)</span>
+                <MagnitudeBadge ipeak={ipeak} size="lg" showHint />
+              </div>
+            )}
             {ipeak && selectedAsset && (
               <StressGauge ratio={parseFloat(ipeak) / selectedAsset.kapasitas_desain_ka} />
             )}
@@ -166,7 +173,11 @@ export default function EventInput() {
               )}
             </div>
 
-            {/* Stress gauge */}
+            {/* Magnitude category (absolute kA) + stress gauge */}
+            <div className="flex items-center justify-between">
+              <span className="text-gray-500 text-sm">Kategori Magnitudo</span>
+              <MagnitudeBadge ipeak={result.estimasi_arus_puncak_ka ?? parseFloat(ipeak)} size="lg" showHint />
+            </div>
             <StressGauge ratio={result.rasio_stres || 0} />
 
             {/* Fuzzy output */}

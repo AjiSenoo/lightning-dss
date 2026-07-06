@@ -116,6 +116,26 @@ def _emit_lightning_broadcast(event):
         Notification.objects.bulk_create(rows)
 
 
+def _emit_incidental_notification(event):
+    """Fan-out an incidental-inspection alert when a 'besar' (large) stroke is recorded.
+    Large strikes are the practitioner trigger for an incidental (event-driven) inspection
+    on top of the periodic cycle (fuzzy_config.INCIDENTAL_TRIGGER_MAGNITUDE)."""
+    from fuzzy_engine import fuzzy_config as cfg
+    if event.kategori_magnitudo != cfg.INCIDENTAL_TRIGGER_MAGNITUDE:
+        return
+    org = event.asset.organization
+    qs = User.objects.filter(is_active=True, role__in=['Manajer', 'Teknisi'])
+    if org:
+        qs = qs.filter(organization=org)
+    actor = event.created_by
+    if actor:
+        qs = qs.exclude(pk=actor.pk)
+    rows = [Notification(recipient=r, actor=actor, verb='incidental_inspection',
+                         event=event, asset=event.asset) for r in qs]
+    if rows:
+        Notification.objects.bulk_create(rows)
+
+
 def _emit_asset_notification(asset, actor, verb):
     """Notify all active users in the asset's org (except the actor) about an asset change."""
     org = asset.organization
@@ -226,7 +246,7 @@ class AssetViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         tracked = [
-            'nama_gedung', 'lokasi_gps', 'lpl_grade', 'tahun_instalasi',
+            'nama_gedung', 'lokasi_gps', 'lpl_grade', 'tahun_instalasi', 'tanggal_instalasi',
             'jenis_material_konduktor', 'resistivitas_tanah', 'catatan',
             'skor_kesehatan_aset',
         ]
@@ -237,8 +257,18 @@ class AssetViewSet(viewsets.ModelViewSet):
             if old != new:
                 diff[f] = {'old': str(old) if old is not None else None,
                             'new': str(new) if new is not None else None}
+        # Editing the install date or LPL grade must re-date the components (age/stress
+        # clock) and refresh the cached health so the AHI isn't stale for up to the TTL.
+        resync_components = 'tanggal_instalasi' in diff or 'tahun_instalasi' in diff or 'lpl_grade' in diff
         with transaction.atomic():
             updated = serializer.save()
+            if resync_components:
+                new_install = updated.tanggal_instalasi or datetime.date(updated.tahun_instalasi, 1, 1)
+                updated.components.filter(end_date__isnull=True, deleted_at__isnull=True).update(
+                    install_date=new_install,
+                )
+            if resync_components or diff:
+                updated.recompute_health()
             if diff:
                 AssetAudit.objects.create(
                     asset=updated, actor=request.user, action='update',
@@ -324,10 +354,14 @@ class AssetViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=new_data)
         serializer.is_valid(raise_exception=True)
         with transaction.atomic():
-            new_asset = serializer.save(organization=old.organization)
+            # Soft-delete the old asset BEFORE creating the new one. Both default to the
+            # same nama_gedung, so creating the new asset while the old is still live would
+            # momentarily violate uniq_live_asset_name_per_org (a partial unique index on
+            # (organization, nama_gedung) WHERE deleted_at IS NULL, checked per-row on INSERT).
             old.deleted_at = timezone.now()
             old.deleted_by = request.user
             old.save(update_fields=['deleted_at', 'deleted_by'])
+            new_asset = serializer.save(organization=old.organization, predecessor=old)
             AssetAudit.objects.create(
                 asset=old, actor=request.user, action='replace_out',
                 note=catatan_penggantian,
@@ -402,6 +436,7 @@ class EventViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             event = serializer.save(created_by=user)
             _emit_lightning_broadcast(event)
+            _emit_incidental_notification(event)
 
         # Run per-component fuzzy inference outside the transaction
         try:

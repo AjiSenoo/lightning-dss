@@ -121,18 +121,23 @@ def _recommendation(component_type, action, time_horizon, urgency_label, driver,
 
 
 def recommend_for_asset(per_component_ahi: dict, per_component_fuzzy: dict,
-                        latest_measurements: dict | None = None) -> dict:
+                        latest_measurements: dict | None = None,
+                        incidental: bool = False) -> dict:
     """
     Produce per-component recommendations and pick the asset-level headline.
 
     per_component_ahi   : {ct: calculate_component_ahi() result}
     per_component_fuzzy : {ct: run_inference() result}
     latest_measurements : {ct: float | None}  — GR resistance reading etc.
+    incidental          : True when the asset's most recent strike is 'besar' — surfaces an
+                          incidental (event-driven) inspection as the headline unless a more
+                          urgent condition-based item already exists.
 
     Returns:
         per_component     — list of recommendation dicts
         headline          — most urgent recommendation
         action_summary    — human-readable summary e.g. "1 ganti, 2 pantau"
+        incidental        — echoed flag so the UI can badge the incidental trigger
     """
     if latest_measurements is None:
         latest_measurements = {}
@@ -149,9 +154,18 @@ def recommend_for_asset(per_component_ahi: dict, per_component_fuzzy: dict,
             'per_component':  [],
             'headline':       None,
             'action_summary': '',
+            'incidental':     incidental,
         }
 
     headline = max(recs, key=lambda r: _URGENCY_RANK.get(r['urgency_label'], 0))
+
+    # A 'besar' strike forces at least a priority incidental inspection (within 1 month),
+    # unless a hard-fail/darurat item already outranks it.
+    if incidental and _URGENCY_RANK.get(headline['urgency_label'], 0) < _URGENCY_RANK['Inspeksi Darurat']:
+        headline = _recommendation(
+            headline['component_type'], 'inspect', 'within_1_month',
+            'Inspeksi Prioritas', 'stress', 'INCIDENTAL_BESAR',
+        )
 
     action_counts = {}
     for r in recs:
@@ -163,4 +177,5 @@ def recommend_for_asset(per_component_ahi: dict, per_component_fuzzy: dict,
         'per_component':  recs,
         'headline':       headline,
         'action_summary': action_summary,
+        'incidental':     incidental,
     }

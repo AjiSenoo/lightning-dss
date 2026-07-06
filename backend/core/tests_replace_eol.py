@@ -50,7 +50,8 @@ class AssetReplaceDatingTests(_Base):
 
         new_asset = AssetRegistry.objects.get(asset_id=resp.data['asset_id'])
         comps = new_asset.components.filter(end_date__isnull=True)
-        self.assertEqual(comps.count(), 3)
+        # Full functional chain AT/DC/GR/BND/SPD/EQP is auto-created on the new asset.
+        self.assertEqual(comps.count(), 6)
         for c in comps:
             self.assertEqual(c.install_date, today)  # age starts at 0 days, not Jan 1
         self.assertEqual(new_asset.tahun_instalasi, today.year)
@@ -141,7 +142,12 @@ class ComponentEolNotificationTests(_Base):
         )
 
     def test_healthy_component_no_notification(self):
-        self._set_age('AT', 0.10)   # 10% consumed -> below warning
+        # Freshly-install every component (well below any warning threshold, and below the
+        # SPD 5-year / 25-strike inspection trigger) so a healthy fleet emits no EOL notice.
+        recent = timezone.localdate() - datetime.timedelta(days=200)
+        AssetComponent.objects.filter(
+            asset=self.asset, end_date__isnull=True,
+        ).update(install_date=recent)
         self._run()
         self.assertEqual(Notification.objects.filter(verb__startswith='component_eol').count(), 0)
 

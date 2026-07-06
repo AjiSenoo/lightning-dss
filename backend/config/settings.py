@@ -179,7 +179,14 @@ LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
-        'verbose': {'format': '[{asctime}] {levelname} {name}: {message}', 'style': '{'},
+        # datefmt's %Z prints the process zone abbreviation — 'WIB' once TZ=Asia/Jakarta
+        # is set (Dockerfile / TZ env), so each line names its zone and can't be mistaken
+        # for UTC. Stays truthful if ever run in another zone (prints that zone instead).
+        'verbose': {
+            'format': '[{asctime}] {levelname} {name}: {message}',
+            'datefmt': '%Y-%m-%d %H:%M:%S %Z',
+            'style': '{',
+        },
     },
     'handlers': {
         'console': {'class': 'logging.StreamHandler', 'formatter': 'verbose'},
@@ -210,3 +217,7 @@ COMPONENT_EOL_WARNING_FRACTION     = float(os.environ.get('COMPONENT_EOL_WARNING
 COMPONENT_EOL_URGENT_FRACTION      = float(os.environ.get('COMPONENT_EOL_URGENT_FRACTION', '0.95'))
 COMPONENT_EOL_URGENT_MONTHS        = int(os.environ.get('COMPONENT_EOL_URGENT_MONTHS', '3'))
 COMPONENT_EOL_NOTIFY_COOLDOWN_DAYS = int(os.environ.get('COMPONENT_EOL_NOTIFY_COOLDOWN_DAYS', '30'))
+
+# Periodic (biyearly=semiannual) baseline-inspection reminder (see check_periodic_inspection).
+# Cadence itself lives in fuzzy_config.PERIODIC_INSPECTION_MONTHS; this caps re-notification.
+PERIODIC_NOTIFY_COOLDOWN_DAYS = int(os.environ.get('PERIODIC_NOTIFY_COOLDOWN_DAYS', '30'))

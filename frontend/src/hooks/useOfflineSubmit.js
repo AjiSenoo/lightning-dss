@@ -99,5 +99,38 @@ export default function useOfflineSubmit() {
     }
   }
 
-  return { submitEvent, submitInspection, isSubmitting, isOnline }
+  // Asset/component mutations: run online, or queue for replay when offline.
+  // Returns { queued: boolean, data }.
+  const submitMaintenance = async (payload) => {
+    if (isOnline) {
+      const res = await client.post('/maintenance-actions/', payload)
+      return { queued: false, data: res.data }
+    }
+    await addToSyncQueue({ type: 'maintenance', payload })
+    return { queued: true, data: null }
+  }
+
+  const submitAssetReplace = async (assetId, payload) => {
+    if (isOnline) {
+      const res = await client.post(`/assets/${assetId}/replace/`, payload)
+      return { queued: false, data: res.data }
+    }
+    await addToSyncQueue({ type: 'asset_replace', assetId, payload })
+    return { queued: true, data: null }
+  }
+
+  const submitAssetDelete = async (assetId) => {
+    if (isOnline) {
+      await client.delete(`/assets/${assetId}/`)
+      return { queued: false, data: null }
+    }
+    await addToSyncQueue({ type: 'asset_delete', assetId })
+    return { queued: true, data: null }
+  }
+
+  return {
+    submitEvent, submitInspection,
+    submitMaintenance, submitAssetReplace, submitAssetDelete,
+    isSubmitting, isOnline,
+  }
 }

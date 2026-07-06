@@ -2,7 +2,7 @@ import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Cell,
 } from 'recharts'
-import { formatDate, formatDateTime } from '../utils/constants'
+import { formatDate, formatDateTime, DAMAGE_ONSET_KA } from '../utils/constants'
 
 const URGENCY_COLORS = {
   'Inspeksi Rutin':      '#22C55E',
@@ -72,6 +72,12 @@ export default function StrikeChart({ events = [], kapasitasKa }) {
           name="Arus Puncak"
         />
         <Tooltip content={<CustomTooltip />} />
+        <ReferenceLine
+          y={DAMAGE_ONSET_KA}
+          strokeDasharray="2 2"
+          stroke="#FB923C"
+          label={{ value: `Ambang kerusakan ${DAMAGE_ONSET_KA} kA`, position: 'insideBottomRight', fontSize: 10, fill: '#FB923C' }}
+        />
         {kapasitasKa && (
           <ReferenceLine
             y={kapasitasKa}

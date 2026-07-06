@@ -237,6 +237,7 @@ class Command(BaseCommand):
             tgl_inspeksi=now - timedelta(days=3),
             status_air_terminal='OK', status_down_conductor='OK',
             status_grounding='OK', resistansi_grounding_ohm=4.2,
+            status_spd='OK',
             catatan_teknisi='[DEMO] Inspeksi rutin. Semua komponen dalam kondisi baik.',
             updated_by=teknisi,
         )
@@ -275,6 +276,7 @@ class Command(BaseCommand):
             tgl_inspeksi=now - timedelta(days=5),
             status_air_terminal='OK', status_down_conductor='OK',
             status_grounding='High_Resistance', resistansi_grounding_ohm=18.7,
+            status_spd='OK',
             catatan_teknisi=catatan_edited,
             updated_by=manager,
         )
@@ -332,6 +334,7 @@ class Command(BaseCommand):
             tgl_inspeksi=now - timedelta(days=8),
             status_air_terminal='Rusak', status_down_conductor='OK',
             status_grounding='Terkorosi', resistansi_grounding_ohm=19.5,
+            status_spd='Degraded', arus_bocor_spd_ma=0.85,
             catatan_teknisi='[DEMO] Amandemen: koreksi nilai resistansi grounding dari 22.0 ke 19.5 Ω. —Manajer',
             amends=log3_orig,
             updated_by=manager,
@@ -371,6 +374,7 @@ class Command(BaseCommand):
             tgl_inspeksi=now - timedelta(days=15),
             status_air_terminal='OK', status_down_conductor='OK',
             status_grounding='OK', resistansi_grounding_ohm=7.1,
+            status_spd='OK',
             catatan_teknisi='[DEMO] Inspeksi ini telah dihapus ke Tempat Sampah untuk keperluan demo.',
             deleted_at=now - timedelta(days=2),
             deleted_by=manager,
@@ -610,6 +614,7 @@ class Command(BaseCommand):
                     status_down_conductor=dc_status,
                     status_grounding=gr_status,
                     resistansi_grounding_ohm=res_ohm,
+                    status_spd='OK',
                     catatan_teknisi=f'[DEMO-AUTO] Inspeksi otomatis {ts.date()}',
                     updated_by=teknisi,
                 )

@@ -113,20 +113,25 @@ class AggregateAHITest(TestCase):
         self.assertEqual(result['worst_component'], 'GR')
 
     def test_overall_weighted_mean(self):
-        # 0.30*0.90 + 0.30*0.85 + 0.40*0.55 = 0.27 + 0.255 + 0.22 = 0.745
+        # Raw weighted sum (no renormalisation) with current COMPONENT_WEIGHTS
+        # (AT 0.28, DC 0.26, GR 0.20): 0.28*0.90 + 0.26*0.85 + 0.20*0.55
+        #   = 0.252 + 0.221 + 0.110 = 0.583
         component_results = {
             'AT': self._make_result(0.90),
             'DC': self._make_result(0.85),
             'GR': self._make_result(0.55),
         }
         result = aggregate_asset_ahi(component_results)
-        self.assertAlmostEqual(result['ahi_overall'], 0.745, places=3)
+        self.assertAlmostEqual(result['ahi_overall'], 0.583, places=3)
 
     def test_all_healthy(self):
+        # All five degrading components healthy → weights sum to 1.0 → overall 1.0.
         component_results = {
-            'AT': self._make_result(1.0),
-            'DC': self._make_result(1.0),
-            'GR': self._make_result(1.0),
+            'AT':  self._make_result(1.0),
+            'DC':  self._make_result(1.0),
+            'GR':  self._make_result(1.0),
+            'BND': self._make_result(1.0),
+            'SPD': self._make_result(1.0),
         }
         result = aggregate_asset_ahi(component_results)
         self.assertAlmostEqual(result['ahi_safety'], 1.0)

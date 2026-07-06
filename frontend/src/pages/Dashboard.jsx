@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ResponsiveContainer, LineChart, Line, Tooltip as ReTooltip } from 'recharts'
 import AssetMap from '../components/AssetMap'
 import { UrgencyBadge } from '../components/StatusBadge'
+import MagnitudeBadge from '../components/MagnitudeBadge'
 import { SkeletonStat, SkeletonRow } from '../components/Skeleton'
 import EmptyState from '../components/EmptyState'
 import { formatDateTime, formatDate, HEALTH_BAND_HEX, HEALTH_BAND_LABEL, scoreToBand } from '../utils/constants'
@@ -134,18 +135,23 @@ export default function Dashboard() {
   const isManager = useIsManager()
 
   useEffect(() => {
-    async function load() {
-      setLoading(true)
+    let cancelled = false
+    async function load({ silent = false } = {}) {
+      if (!silent) setLoading(true)
       const [summaryResult, mapResult] = await Promise.all([
         cacheStore.getDashboardSummary(),
         cacheStore.getDashboardMap(),
       ])
+      if (cancelled) return
       setSummary(summaryResult.data)
       setMapAssets(mapResult.data || [])
       setIsStale(summaryResult.isStale || mapResult.isStale)
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
     load()
+    const onSync = () => load({ silent: true })
+    window.addEventListener('sync:done', onSync)
+    return () => { cancelled = true; window.removeEventListener('sync:done', onSync) }
   }, [])
 
   const sparkData = summary?.events_sparkline || []
@@ -234,7 +240,7 @@ export default function Dashboard() {
                   key={e.event_id}
                   icon="⚡"
                   accent="amber"
-                  title={`${e.estimasi_arus_puncak_ka} kA · ${e.asset_nama_gedung}`}
+                  title={<span className="inline-flex items-center gap-2">{e.estimasi_arus_puncak_ka} kA · {e.asset_nama_gedung} <MagnitudeBadge ipeak={e.estimasi_arus_puncak_ka} /></span>}
                   subtitle={formatDateTime(e.timestamp)}
                   badge={e.fuzzy_output_label && <UrgencyBadge label={e.fuzzy_output_label} size="sm" />}
                   onClick={() => navigate(`/assets/${e.asset}`)}

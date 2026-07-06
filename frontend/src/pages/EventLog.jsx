@@ -4,6 +4,7 @@ import client from '../api/client'
 import cacheStore from '../offline/cacheStore'
 import { formatDateTime } from '../utils/constants'
 import { UrgencyBadge } from '../components/StatusBadge'
+import MagnitudeBadge from '../components/MagnitudeBadge'
 import EmptyState from '../components/EmptyState'
 import { SkeletonTable } from '../components/Skeleton'
 
@@ -189,7 +190,10 @@ export default function EventLog() {
                   <td className="py-3 px-4 whitespace-nowrap text-gray-700">{formatDateTime(e.timestamp)}</td>
                   <td className="py-3 px-4 font-medium text-gray-900">{e.asset_nama_gedung}</td>
                   <td className="py-3 px-4 text-gray-700">
-                    {e.estimasi_arus_puncak_ka != null ? `${e.estimasi_arus_puncak_ka} kA` : '—'}
+                    <div className="flex items-center gap-2">
+                      <span>{e.estimasi_arus_puncak_ka != null ? `${e.estimasi_arus_puncak_ka} kA` : '—'}</span>
+                      {e.estimasi_arus_puncak_ka != null && <MagnitudeBadge ipeak={e.estimasi_arus_puncak_ka} />}
+                    </div>
                   </td>
                   <td className="py-3 px-4 text-gray-700">
                     {e.rasio_stres != null ? e.rasio_stres.toFixed(2) : '—'}

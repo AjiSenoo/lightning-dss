@@ -33,6 +33,9 @@ export default function AssetPortfolio() {
 
   useEffect(() => {
     reload()
+    const onSync = () => reload()
+    window.addEventListener('sync:done', onSync)
+    return () => window.removeEventListener('sync:done', onSync)
   }, [])
 
   const filtered = assets.filter((a) => {

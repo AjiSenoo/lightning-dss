@@ -21,9 +21,13 @@ class CacheStore {
     }
   }
 
-  async getAsset(assetId) {
+  async getAsset(assetId, { includeDeleted = false } = {}) {
+    // include_deleted=true lets the trash → detail → restore flow fetch a soft-deleted
+    // asset (the default queryset filters deleted_at, which would 404 and fall back to a
+    // stale-but-active cached copy, hiding the Pulihkan button).
+    const qs = includeDeleted ? '?include_deleted=true' : ''
     try {
-      const response = await client.get(`/assets/${assetId}/`)
+      const response = await client.get(`/assets/${assetId}/${qs}`)
       const asset = response.data
       const db = await getDB()
       await db.put('assets', asset)

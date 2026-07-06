@@ -35,7 +35,7 @@ The engine produces an **IUI (Indeks Urgensi Inspeksi) score (0–100)** mapped 
 
 ### Feedback Loop
 
-After each inspection, the technician logs the condition of 3 physical components. The asset health score updates **asymmetrically**:
+After each inspection, the technician logs the condition of the LPS component chain — air terminal, down conductor (incl. termination kit), grounding, and the mandatory SPD/surge arrester (bonding optional). The asset health score updates **asymmetrically**:
 - Bad finding → health drops fast (**penalty rate 0.5×**)
 - Good finding → health recovers slowly (**recovery rate 0.1×**)
 
@@ -63,7 +63,7 @@ Two roles are enforced throughout the system:
 
 ### Inspection Logs (Laporan)
 
-- Teknisi submits inspections with required (air terminal, down conductor, grounding) and optional (SPD, bonding, cable) component statuses plus photos
+- Teknisi submits inspections with required (air terminal, down conductor incl. termination kit, grounding, and SPD/surge arrester) and optional (bonding, cable) component statuses plus photos. The SPD is a mandatory Type-1 arrester bonded to the earthing system near grounding (IEC 62305-4 / IEC 60364-5-53); the down conductor status includes a "Termination Kit Rusak" hard-fail.
 - **5-minute grace window** for the submitter to freely edit their own log
 - **Amendment chain** — after the grace window, correcting a log creates a new linked amendment log (preserving the original)
 - **Full audit trail** via `InspectionLogAudit`: every create/edit/photo/amend/delete/restore/verify/request_revision action is recorded with field-level diffs

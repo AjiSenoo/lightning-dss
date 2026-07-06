@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 
 import StrikeChart from '../components/StrikeChart'
 import HealthTrend from '../components/HealthTrend'
@@ -8,7 +8,9 @@ import { UrgencyBadge } from '../components/StatusBadge'
 import AssetForm from '../components/AssetForm'
 import { LPL_LABELS, formatDateTime, getHealthStatus, timeAgo } from '../utils/constants'
 import cacheStore from '../offline/cacheStore'
+import { removeCachedAsset } from '../offline/db'
 import client from '../api/client'
+import useOfflineSubmit from '../hooks/useOfflineSubmit'
 import { useAuth, useIsManager } from '../auth/AuthContext'
 
 const GRACE_MS = 5 * 60 * 1000
@@ -117,12 +119,17 @@ function inspectionEligibility(log, currentUserId, isManager) {
 export default function AssetDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const fromTrash = searchParams.get('deleted') === '1'
   const isManager = useIsManager()
   const { user } = useAuth()
+  const { submitMaintenance, submitAssetReplace, submitAssetDelete } = useOfflineSubmit()
   const [asset, setAsset] = useState(null)
   const [history, setHistory] = useState([])
   const [audits, setAudits] = useState([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [toast, setToast] = useState('')
   const [showEdit, setShowEdit] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [restoring, setRestoring] = useState(false)
@@ -134,10 +141,13 @@ export default function AssetDetail() {
   const [showActivityModal, setShowActivityModal] = useState(false)
   const [showComponentsModal, setShowComponentsModal] = useState(false)
 
-  const load = async () => {
-    setLoading(true)
+  // `silent` refetches in the background (no full-page spinner remount) so a button
+  // action refreshes the affected cards in place instead of blanking the whole page.
+  const load = async ({ silent = false } = {}) => {
+    if (silent) setRefreshing(true)
+    else setLoading(true)
     const [assetResult, histResult, auditRes, compsRes, maintRes] = await Promise.all([
-      cacheStore.getAsset(id),
+      cacheStore.getAsset(id, { includeDeleted: fromTrash }),
       cacheStore.getAssetHistory(id),
       client.get(`/assets/${id}/audits/`).catch(() => ({ data: [] })),
       client.get(`/components/?asset=${id}&active=false`).catch(() => ({ data: [] })),
@@ -153,7 +163,15 @@ export default function AssetDetail() {
     setComponentMap(map)
     const rawMaint = Array.isArray(maintRes.data) ? maintRes.data : (maintRes.data?.results ?? [])
     setMaintenanceHistory(rawMaint)
-    setLoading(false)
+    if (silent) setRefreshing(false)
+    else setLoading(false)
+  }
+
+  const refresh = () => load({ silent: true })
+
+  const flashToast = (msg) => {
+    setToast(msg)
+    setTimeout(() => setToast(''), 3500)
   }
 
   useEffect(() => {
@@ -161,13 +179,23 @@ export default function AssetDetail() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
+  // Re-sync when the offline queue drains so an open detail page isn't left stale.
+  useEffect(() => {
+    const onSync = () => refresh()
+    window.addEventListener('sync:done', onSync)
+    return () => window.removeEventListener('sync:done', onSync)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, fromTrash])
+
   const handleDelete = async () => {
     if (!confirm(
       `Pindahkan aset "${asset.nama_gedung}" ke Tempat Sampah?\n\nAset bisa dipulihkan kembali. Inspeksi dan kejadian sambaran yang terhubung tetap utuh.`
     )) return
     setDeleting(true)
     try {
-      await client.delete(`/assets/${id}/`)
+      const { queued } = await submitAssetDelete(id)
+      await removeCachedAsset(id)   // drop the ghost from IndexedDB immediately
+      if (queued) flashToast('Penghapusan diantrekan — akan disinkronkan saat online.')
       navigate('/assets', { replace: true })
     } catch (err) {
       alert('Gagal memindah aset: ' + (err?.response?.data?.detail || err.message))
@@ -179,18 +207,23 @@ export default function AssetDetail() {
     setRestoring(true)
     try {
       await client.post(`/assets/${id}/restore/`)
-      load()
+      // Now active again — drop the trash flag so the reload fetches the live record.
+      navigate(`/assets/${id}`, { replace: true })
+      await refresh()
     } catch (err) {
       alert('Gagal memulihkan aset: ' + (err?.response?.data?.detail || err.message))
+    } finally {
       setRestoring(false)
     }
   }
+
+  const ACTION_VERB = { replace: 'Penggantian', repair: 'Perbaikan', inspect: 'Inspeksi', monitor: 'Pemantauan', install: 'Pemasangan' }
 
   const handleCreateMaintenance = async () => {
     const m = maintenanceModal
     setMaintenanceModal((prev) => ({ ...prev, saving: true }))
     try {
-      await client.post('/maintenance-actions/', {
+      const { queued } = await submitMaintenance({
         asset: id,
         component: m.compId,
         action: m.action,
@@ -200,7 +233,14 @@ export default function AssetDetail() {
         notes: m.notes || '',
       })
       setMaintenanceModal(null)
-      load()
+      if (queued) {
+        flashToast(`${ACTION_VERB[m.action] || 'Aksi'} diantrekan — akan disinkronkan saat online.`)
+      } else {
+        await refresh()
+        // A 'repair' records the action but (honestly) does not reset the strike/age-driven
+        // AHI, so confirm explicitly that it registered rather than looking like a dead button.
+        flashToast(`${ACTION_VERB[m.action] || 'Aksi'} tercatat.`)
+      }
     } catch (err) {
       alert('Gagal menyimpan: ' + (err?.response?.data?.detail || JSON.stringify(err?.response?.data) || err.message))
       setMaintenanceModal((prev) => ({ ...prev, saving: false }))
@@ -212,12 +252,18 @@ export default function AssetDetail() {
     if (!m.catatan_penggantian?.trim()) return
     setReplaceModal((prev) => ({ ...prev, saving: true }))
     try {
-      const res = await client.post(`/assets/${id}/replace/`, {
+      const { queued, data } = await submitAssetReplace(id, {
         tanggal_instalasi: m.tanggal_instalasi,
         catatan_penggantian: m.catatan_penggantian,
       })
+      await removeCachedAsset(id)   // old asset becomes soft-deleted; drop the ghost
       setReplaceModal(null)
-      navigate(`/assets/${res.data.asset_id}`, { replace: true })
+      if (queued || !data?.asset_id) {
+        flashToast('Penggantian diantrekan — akan disinkronkan saat online.')
+        navigate('/assets', { replace: true })
+      } else {
+        navigate(`/assets/${data.asset_id}`, { replace: true })
+      }
     } catch (err) {
       alert('Gagal mengganti aset: ' + (err?.response?.data?.detail || JSON.stringify(err?.response?.data) || err.message))
       setReplaceModal((prev) => ({ ...prev, saving: false }))
@@ -407,9 +453,15 @@ export default function AssetDetail() {
 
   return (
     <div className="space-y-6">
+      {toast && (
+        <div className="fixed top-4 right-4 z-50 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg animate-fade-in-up">
+          ✓ {toast}
+        </div>
+      )}
       <div className="flex items-center gap-3 flex-wrap">
         <button className="btn-secondary" onClick={() => navigate('/assets')}>← Kembali</button>
         <h1 className="text-xl font-bold text-gray-900 truncate flex-1 min-w-0">{asset.nama_gedung}</h1>
+        {refreshing && <span className="text-xs text-gray-400 animate-pulse">menyegarkan…</span>}
         {isManager && (
           <div className="flex gap-2">
             {asset.deleted_at ? (
@@ -453,11 +505,17 @@ export default function AssetDetail() {
         </div>
       )}
 
+      {asset.recommendations?.incidental && !asset.deleted_at && (
+        <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 text-sm text-orange-800 flex items-center gap-2">
+          ⚡ <span><strong>Inspeksi insidental</strong> — sambaran <strong>besar</strong> terbaru memicu inspeksi event-driven (≤ 1 bulan), di luar siklus periodik.</span>
+        </div>
+      )}
+
       {showEdit && (
         <AssetForm
           asset={asset}
           onClose={() => setShowEdit(false)}
-          onSaved={() => load()}
+          onSaved={() => { setShowEdit(false); refresh(); flashToast('Aset diperbarui.') }}
         />
       )}
 
@@ -568,29 +626,46 @@ export default function AssetDetail() {
                       <span>Umur {Math.round((comp.sub_scores?.age ?? 1) * 100)}%</span>
                       {comp.corrosion_applied && <span className="text-red-500 font-medium">⚠ Korosi</span>}
                     </div>
-                    {rec && (
-                      <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-gray-50">
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${info.badge}`}>
-                          {ACTION_LABELS[rec.action]}
-                        </span>
-                        <span className="text-xs text-gray-500">{HORIZON_LABELS[rec.time_horizon]}</span>
-                        <span className="text-xs text-gray-400">· {DRIVER_LABELS[rec.primary_driver]}</span>
-                        {compId && !asset.deleted_at && (
-                          <button
-                            className="ml-auto text-xs text-brand-700 hover:underline font-medium"
-                            onClick={() => setMaintenanceModal({
-                              ct,
-                              compId,
-                              action: rec.action === 'monitor' || rec.action === 'inspect' ? 'repair' : rec.action,
-                              performed_at: nowLocal,
-                              notes: '',
-                            })}
-                          >
-                            + Aksi Pemeliharaan
-                          </button>
-                        )}
-                      </div>
-                    )}
+                    {(() => {
+                      const lastMaint = maintenanceHistory
+                        .filter((a) => (a.component === compId) || (a.component_type === ct))
+                        .sort((a, b) => new Date(b.performed_at) - new Date(a.performed_at))[0]
+                      const defaultAction = rec && rec.action !== 'monitor' && rec.action !== 'inspect' ? rec.action : 'repair'
+                      return (
+                        <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-gray-50">
+                          {rec ? (
+                            <>
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${info.badge}`}>
+                                {ACTION_LABELS[rec.action]}
+                              </span>
+                              <span className="text-xs text-gray-500">{HORIZON_LABELS[rec.time_horizon]}</span>
+                              <span className="text-xs text-gray-400">· {DRIVER_LABELS[rec.primary_driver]}</span>
+                            </>
+                          ) : (
+                            <span className="text-xs text-gray-400">Kondisi baik — pantau</span>
+                          )}
+                          {lastMaint && (
+                            <span className="text-xs text-gray-400" title="Pemeliharaan terakhir">
+                              🛠 {ACTION_LABELS[lastMaint.action] || lastMaint.action} · {formatDateTime(lastMaint.performed_at)}
+                            </span>
+                          )}
+                          {compId && !asset.deleted_at && (
+                            <button
+                              className="ml-auto text-xs text-brand-700 hover:underline font-medium"
+                              onClick={() => setMaintenanceModal({
+                                ct,
+                                compId,
+                                action: defaultAction,
+                                performed_at: nowLocal,
+                                notes: '',
+                              })}
+                            >
+                              + Aksi Pemeliharaan
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </div>
                 )
               })}
