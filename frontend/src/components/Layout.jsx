@@ -1,24 +1,28 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import OfflineBanner from './OfflineBanner'
 import SyncIndicator from './SyncIndicator'
 import HeaderClock from './HeaderClock'
 import NotificationBell from './NotificationBell'
+import OnboardingTour from './OnboardingTour'
+import { buildTourSteps } from '../onboarding/tourSteps'
 import { useAuth, useIsManager } from '../auth/AuthContext'
 
 const BASE_NAV_ITEMS = [
-  { to: '/dashboard', label: 'Dashboard', icon: '🏠', end: true },
-  { to: '/assets', label: 'Portofolio Aset', icon: '🏗️', end: true },
-  { to: '/inspections', label: 'Riwayat Inspeksi', icon: '📋', end: true },
-  { to: '/events', label: 'Riwayat Sambaran', icon: '🌩️', end: true },
-  { to: '/inspections/new', label: 'Input Logbook', icon: '✏️' },
-  { to: '/events/new', label: 'Input Kejadian', icon: '⚡' },
+  { to: '/dashboard', label: 'Dashboard', icon: '🏠', end: true, tourId: 'nav-dashboard' },
+  { to: '/assets', label: 'Portofolio Aset', icon: '🏗️', end: true, tourId: 'nav-assets' },
+  { to: '/inspections', label: 'Riwayat Inspeksi', icon: '📋', end: true, tourId: 'nav-inspections' },
+  { to: '/events', label: 'Riwayat Sambaran', icon: '🌩️', end: true, tourId: 'nav-events' },
+  { to: '/inspections/new', label: 'Input Logbook', icon: '✏️', tourId: 'nav-inspections-new' },
+  { to: '/events/new', label: 'Input Kejadian', icon: '⚡', tourId: 'nav-events-new' },
 ]
 
 const MANAGER_NAV_ITEMS = [
-  { to: '/users', label: 'Manajemen Pengguna', icon: '👥', end: true },
-  { to: '/inspections/trash', label: 'Tempat Sampah', icon: '🗑️', end: true },
+  { to: '/users', label: 'Manajemen Pengguna', icon: '👥', end: true, tourId: 'nav-users' },
+  { to: '/inspections/trash', label: 'Tempat Sampah', icon: '🗑️', end: true, tourId: 'nav-trash' },
 ]
+
+const TOUR_KEY = (id) => `lightning_tour_seen_v1_${id}`
 
 function getInitials(user) {
   const source = user?.nama_lengkap || user?.username || '?'
@@ -31,10 +35,37 @@ function getInitials(user) {
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [tourActive, setTourActive] = useState(false)
   const { user, logout } = useAuth()
   const isManager = useIsManager()
   const navigate = useNavigate()
   const navItems = isManager ? [...BASE_NAV_ITEMS, ...MANAGER_NAV_ITEMS] : BASE_NAV_ITEMS
+  const tourSteps = useMemo(() => buildTourSteps({ isManager }), [isManager])
+
+  // Auto-open the tour once, on a user's first login.
+  useEffect(() => {
+    if (!user?.id) return
+    if (!localStorage.getItem(TOUR_KEY(user.id))) {
+      setTourActive(true)
+    }
+  }, [user?.id])
+
+  const startTour = () => setTourActive(true)
+
+  const finishTour = () => {
+    setTourActive(false)
+    setSidebarOpen(false)
+    if (user?.id) localStorage.setItem(TOUR_KEY(user.id), '1')
+  }
+
+  // On mobile the sidebar is off-canvas; open it while a nav step is active
+  // so the highlighted menu item is visible.
+  const handleTourStep = (step) => {
+    if (typeof window === 'undefined') return
+    if (window.innerWidth < 768 && step?.tourId?.startsWith('nav-')) {
+      setSidebarOpen(true)
+    }
+  }
 
   const handleLogout = () => {
     logout()
@@ -69,6 +100,15 @@ export default function Layout() {
           {user && (
             <>
               <HeaderClock />
+              <button
+                onClick={startTour}
+                data-tour="help"
+                className="w-7 h-7 rounded-full border border-white/25 hover:bg-white/10 transition-colors flex items-center justify-center text-sm font-semibold"
+                title="Buka panduan penggunaan"
+                aria-label="Buka panduan penggunaan"
+              >
+                ?
+              </button>
               <NotificationBell />
               {/* Avatar + name + org */}
               <div className="flex items-center gap-2.5">
@@ -112,6 +152,7 @@ export default function Layout() {
                 key={item.to}
                 to={item.to}
                 end={item.end}
+                data-tour={item.tourId}
                 onClick={() => setSidebarOpen(false)}
                 className={({ isActive }) =>
                   `relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
@@ -155,6 +196,13 @@ export default function Layout() {
           </div>
         </main>
       </div>
+
+      <OnboardingTour
+        steps={tourSteps}
+        active={tourActive}
+        onFinish={finishTour}
+        onStepChange={handleTourStep}
+      />
     </div>
   )
 }
