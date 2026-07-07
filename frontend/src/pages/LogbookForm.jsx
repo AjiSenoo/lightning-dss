@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { COMPONENT_OPTIONS, LPL_LABELS, formatDateTime, HEALTH_BAND_HEX, HEALTH_BAND_LABEL, scoreToBand } from '../utils/constants'
+import { COMPONENT_OPTIONS, LPL_LABELS, formatDateTime, HEALTH_BAND_HEX, HEALTH_BAND_LABEL, scoreToBand, nowInJakarta } from '../utils/constants'
 import useOfflineSubmit from '../hooks/useOfflineSubmit'
 import cacheStore from '../offline/cacheStore'
 import client from '../api/client'
@@ -121,7 +121,7 @@ export default function LogbookForm() {
     status_bonding: '',
     status_shielding: '',
     catatan_teknisi: '',
-    tgl_inspeksi: new Date().toISOString().slice(0, 16),
+    tgl_inspeksi: nowInJakarta(),
     user: '',
   })
 
@@ -144,7 +144,7 @@ export default function LogbookForm() {
         setSelectedAssetId(log.asset || '')
         setEventId(log.event || '')
         setExistingPhotos(log.photos || [])
-        const isoLocal = log.tgl_inspeksi ? log.tgl_inspeksi.slice(0, 16) : new Date().toISOString().slice(0, 16)
+        const isoLocal = log.tgl_inspeksi ? log.tgl_inspeksi.slice(0, 16) : nowInJakarta()
         setForm({
           status_air_terminal: log.status_air_terminal || 'OK',
           status_down_conductor: log.status_down_conductor || 'OK',

@@ -159,3 +159,21 @@ export const formatDateTime = (dateStr) => {
   })
   return `${formatted} WIB`
 }
+
+// Current wall-clock time in Asia/Jakarta as "YYYY-MM-DDTHH:mm", for use as
+// defaults in <input type="datetime-local"> — explicitly pinned to WIB
+// instead of relying on the browser's OS timezone or UTC (new Date().toISOString()).
+export const nowInJakarta = () => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(new Date())
+  const get = (type) => {
+    const v = parts.find((p) => p.type === type).value
+    return v === '24' ? '00' : v // Intl midnight-hour quirk in some environments
+  }
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`
+}
+
+export const todayInJakarta = () => nowInJakarta().slice(0, 10)

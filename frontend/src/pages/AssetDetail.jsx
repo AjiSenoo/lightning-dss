@@ -6,7 +6,7 @@ import HealthTrend from '../components/HealthTrend'
 import { HealthGaugeInline } from '../components/HealthGauge'
 import { UrgencyBadge } from '../components/StatusBadge'
 import AssetForm from '../components/AssetForm'
-import { LPL_LABELS, formatDateTime, getHealthStatus, timeAgo } from '../utils/constants'
+import { LPL_LABELS, formatDateTime, getHealthStatus, timeAgo, nowInJakarta, todayInJakarta } from '../utils/constants'
 import cacheStore from '../offline/cacheStore'
 import { removeCachedAsset } from '../offline/db'
 import client from '../api/client'
@@ -482,7 +482,7 @@ export default function AssetDetail() {
                 <button
                   className="text-sm bg-purple-50 hover:bg-purple-100 text-purple-700 px-3 py-2 rounded-lg font-medium"
                   onClick={() => setReplaceModal({
-                    tanggal_instalasi: new Date().toISOString().slice(0, 10),
+                    tanggal_instalasi: todayInJakarta(),
                     catatan_penggantian: '',
                   })}
                 >
@@ -605,7 +605,7 @@ export default function AssetDetail() {
                 const info       = BAND_INFO[band]
                 const compId     = componentMap[ct]
                 const activeComp = allComponents.find((c) => c.component_type === ct && !c.end_date)
-                const nowLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+                const nowLocal = nowInJakarta()
                 return (
                   <div key={ct} className="rounded-xl border border-gray-100 p-3 space-y-2">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -783,7 +783,7 @@ export default function AssetDetail() {
                 <input
                   type="date"
                   className="input w-full"
-                  max={new Date().toISOString().slice(0, 10)}
+                  max={todayInJakarta()}
                   value={replaceModal.tanggal_instalasi}
                   onChange={(e) => setReplaceModal((m) => ({ ...m, tanggal_instalasi: e.target.value }))}
                 />

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { UrgencyBadge } from '../components/StatusBadge'
 import MagnitudeBadge from '../components/MagnitudeBadge'
-import { URGENCY_ACTIONS, LPL_CAPACITY, formatDateTime } from '../utils/constants'
+import { URGENCY_ACTIONS, LPL_CAPACITY, formatDateTime, nowInJakarta } from '../utils/constants'
 import useOfflineSubmit from '../hooks/useOfflineSubmit'
 import cacheStore from '../offline/cacheStore'
 
@@ -41,7 +41,7 @@ export default function EventInput() {
   const [ipeak, setIpeak] = useState('')
   const [catatan, setCatatan] = useState('')
   const [result, setResult] = useState(null)
-  const [timestamp, setTimestamp] = useState(() => new Date().toISOString().slice(0, 16))
+  const [timestamp, setTimestamp] = useState(() => nowInJakarta())
 
   useEffect(() => {
     cacheStore.getAssets().then((r) => {

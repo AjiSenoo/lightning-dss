@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import client from '../api/client'
-import { LPL_LABELS } from '../utils/constants'
+import { LPL_LABELS, todayInJakarta } from '../utils/constants'
 
 const LPL_OPTIONS = ['I', 'II', 'III', 'IV']
 
-const today = () => new Date().toISOString().slice(0, 10)
+const today = () => todayInJakarta()
 
 const EMPTY = {
   nama_gedung: '',
