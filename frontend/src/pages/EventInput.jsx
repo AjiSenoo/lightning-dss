@@ -5,6 +5,9 @@ import MagnitudeBadge from '../components/MagnitudeBadge'
 import { URGENCY_ACTIONS, LPL_CAPACITY, formatDateTime, nowInJakarta } from '../utils/constants'
 import useOfflineSubmit from '../hooks/useOfflineSubmit'
 import cacheStore from '../offline/cacheStore'
+import OnboardingTour from '../components/OnboardingTour'
+import usePageTour from '../onboarding/usePageTour'
+import { buildEventTour } from '../onboarding/tourSteps'
 
 function StressGauge({ ratio }) {
   const pct = Math.min(ratio / 1.5, 1)
@@ -35,6 +38,7 @@ export default function EventInput() {
   const location = useLocation()
   const navigate = useNavigate()
   const { submitEvent, isSubmitting, isOnline } = useOfflineSubmit()
+  const tour = usePageTour('event')
 
   const [assets, setAssets] = useState([])
   const [selectedAssetId, setSelectedAssetId] = useState(location.state?.assetId || '')
@@ -72,7 +76,17 @@ export default function EventInput() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Input Kejadian Sambaran Petir</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-gray-900">Input Kejadian Sambaran Petir</h1>
+        <button
+          onClick={tour.start}
+          className="shrink-0 w-8 h-8 rounded-full border border-gray-300 text-gray-500 hover:bg-gray-100 transition-colors flex items-center justify-center text-sm font-semibold"
+          title="Panduan langkah pada halaman ini"
+          aria-label="Panduan langkah pada halaman ini"
+        >
+          ?
+        </button>
+      </div>
 
       {!isOnline && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
@@ -86,6 +100,7 @@ export default function EventInput() {
           <div className="card space-y-3">
             <h2 className="font-semibold text-gray-700">1. Pilih Aset</h2>
             <select
+              data-tour="event-asset"
               className="form-input"
               value={selectedAssetId}
               onChange={(e) => setSelectedAssetId(e.target.value)}
@@ -109,7 +124,7 @@ export default function EventInput() {
           {/* Step 2: Input Ipeak */}
           <div className="card space-y-3">
             <h2 className="font-semibold text-gray-700">2. Arus Puncak</h2>
-            <div className="relative">
+            <div className="relative" data-tour="event-ipeak">
               <input
                 type="number"
                 className="form-input pr-12 text-xl h-16"
@@ -132,7 +147,7 @@ export default function EventInput() {
             {ipeak && selectedAsset && (
               <StressGauge ratio={parseFloat(ipeak) / selectedAsset.kapasitas_desain_ka} />
             )}
-            <div>
+            <div data-tour="event-waktu">
               <label className="text-sm text-gray-500">Waktu Kejadian</label>
               <input
                 type="datetime-local"
@@ -156,7 +171,7 @@ export default function EventInput() {
             />
           </div>
 
-          <button type="submit" className="btn-primary w-full py-3" disabled={isSubmitting}>
+          <button type="submit" data-tour="event-submit" className="btn-primary w-full py-3" disabled={isSubmitting}>
             {isSubmitting ? 'Memproses...' : 'Analisis & Simpan'}
           </button>
         </form>
@@ -215,6 +230,12 @@ export default function EventInput() {
           </div>
         </div>
       )}
+
+      <OnboardingTour
+        steps={buildEventTour()}
+        active={tour.active}
+        onFinish={tour.finish}
+      />
     </div>
   )
 }

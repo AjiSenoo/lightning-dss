@@ -14,6 +14,7 @@ import InspectionReport from './pages/InspectionReport'
 import LaporanDetail from './pages/LaporanDetail'
 import LaporanTrash from './pages/LaporanTrash'
 import UserManagement from './pages/UserManagement'
+import Panduan from './pages/Panduan'
 import ManagerOnly from './components/ManagerOnly'
 import { AuthProvider } from './auth/AuthContext'
 import syncManager from './offline/syncManager'
@@ -49,6 +50,7 @@ export default function App() {
             }
           >
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/panduan" element={<Panduan />} />
             <Route path="/assets" element={<AssetPortfolio />} />
             <Route path="/assets/trash" element={<ManagerOnly><AssetTrash /></ManagerOnly>} />
             <Route path="/assets/:id" element={<AssetDetail />} />

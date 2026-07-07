@@ -4,6 +4,9 @@ import { COMPONENT_OPTIONS, LPL_LABELS, formatDateTime, HEALTH_BAND_HEX, HEALTH_
 import useOfflineSubmit from '../hooks/useOfflineSubmit'
 import cacheStore from '../offline/cacheStore'
 import client from '../api/client'
+import OnboardingTour from '../components/OnboardingTour'
+import usePageTour from '../onboarding/usePageTour'
+import { buildLogbookTour } from '../onboarding/tourSteps'
 
 const NON_OK = {
   status_air_terminal:   (v) => v !== 'OK',
@@ -100,6 +103,7 @@ export default function LogbookForm() {
 
   const { submitInspection, isSubmitting, isOnline } = useOfflineSubmit()
   const fileInputRef = useRef(null)
+  const tour = usePageTour('logbook', { enabled: mode === 'create' })
 
   const [assets, setAssets] = useState([])
   const [selectedAssetId, setSelectedAssetId] = useState(location.state?.assetId || '')
@@ -292,7 +296,17 @@ export default function LogbookForm() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">{pageTitle}</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-gray-900">{pageTitle}</h1>
+        <button
+          onClick={tour.start}
+          className="shrink-0 w-8 h-8 rounded-full border border-gray-300 text-gray-500 hover:bg-gray-100 transition-colors flex items-center justify-center text-sm font-semibold"
+          title="Panduan langkah pada halaman ini"
+          aria-label="Panduan langkah pada halaman ini"
+        >
+          ?
+        </button>
+      </div>
 
       {loadError && (
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm">
@@ -328,7 +342,7 @@ export default function LogbookForm() {
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {/* Asset & Event header */}
-        <div className="card space-y-3">
+        <div className="card space-y-3" data-tour="logbook-asset">
           <h2 className="font-semibold text-gray-700">Informasi Inspeksi</h2>
           <select
             className="form-input"
@@ -363,7 +377,7 @@ export default function LogbookForm() {
         </div>
 
         {/* LPS Eksternal — IEC 62305-3 (AT, DC, GR) */}
-        <div className="card space-y-5">
+        <div className="card space-y-5" data-tour="logbook-ext">
           <h2 className="font-semibold text-gray-700">LPS Eksternal</h2>
 
           <div>
@@ -413,7 +427,7 @@ export default function LogbookForm() {
         </div>
 
         {/* LPS Internal — IEC 62305-4 (SPD, Bonding, Shielding) */}
-        <div className="card space-y-5">
+        <div className="card space-y-5" data-tour="logbook-int">
           <h2 className="font-semibold text-gray-700">LPS Internal</h2>
 
           <div>
@@ -461,7 +475,7 @@ export default function LogbookForm() {
         </div>
 
         {/* Evidence */}
-        <div className="card space-y-3">
+        <div className="card space-y-3" data-tour="logbook-photo">
           <h2 className="font-semibold text-gray-700">Bukti & Catatan</h2>
           <textarea
             className="form-input"
@@ -559,6 +573,7 @@ export default function LogbookForm() {
 
         <button
           type="submit"
+          data-tour="logbook-submit"
           className="btn-primary w-full py-3"
           disabled={
             isSubmitting
@@ -577,6 +592,12 @@ export default function LogbookForm() {
             : 'Simpan Logbook Inspeksi'}
         </button>
       </form>
+
+      <OnboardingTour
+        steps={buildLogbookTour()}
+        active={tour.active}
+        onFinish={tour.finish}
+      />
     </div>
   )
 }

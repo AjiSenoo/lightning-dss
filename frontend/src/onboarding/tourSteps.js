@@ -93,4 +93,91 @@ export function buildTourSteps({ isManager } = {}) {
   ]
 }
 
+// ---------------------------------------------------------------------------
+// Page-level task tours. Target ids match `data-tour="..."` attributes added
+// to the form fields on EventInput.jsx and LogbookForm.jsx.
+// ---------------------------------------------------------------------------
+
+export function buildEventTour() {
+  return [
+    {
+      tourId: null,
+      title: 'Mencatat sambaran petir ⚡',
+      body: 'Panduan singkat mengisi kejadian sambaran dan membaca rekomendasinya.',
+      placement: 'center',
+    },
+    {
+      tourId: 'event-asset',
+      title: '1. Pilih aset',
+      body: 'Pilih gedung/fasilitas yang tersambar. Kapasitas desain dan skor kesehatannya akan muncul.',
+      placement: 'bottom',
+    },
+    {
+      tourId: 'event-ipeak',
+      title: '2. Arus puncak (kA)',
+      body: 'Masukkan nilai arus puncak sambaran. Kategori magnitudo dan rasio stres dihitung otomatis.',
+      placement: 'bottom',
+    },
+    {
+      tourId: 'event-waktu',
+      title: 'Waktu kejadian',
+      body: 'Isi tanggal & jam sambaran terjadi (default: waktu sekarang).',
+      placement: 'bottom',
+    },
+    {
+      tourId: 'event-submit',
+      title: 'Analisis & simpan',
+      body: 'Klik untuk menjalankan analisis fuzzy dan menyimpan kejadian.',
+      placement: 'bottom',
+    },
+    {
+      tourId: null,
+      title: 'Membaca hasil',
+      body: 'Setelah disimpan, Anda melihat Tingkat Urgensi, Skor IUI, dan Rekomendasi Tindakan. Dari sana bisa langsung "Buat Tiket Inspeksi".',
+      placement: 'center',
+    },
+  ]
+}
+
+export function buildLogbookTour() {
+  return [
+    {
+      tourId: null,
+      title: 'Mengisi logbook inspeksi 📋',
+      body: 'Panduan singkat mencatat kondisi komponen LPS dan memperbarui skor kesehatan aset.',
+      placement: 'center',
+    },
+    {
+      tourId: 'logbook-asset',
+      title: 'Pilih aset & waktu',
+      body: 'Pilih aset yang diinspeksi dan isi tanggal & waktu inspeksi.',
+      placement: 'bottom',
+    },
+    {
+      tourId: 'logbook-ext',
+      title: 'LPS Eksternal',
+      body: 'Nilai kondisi Air Terminal, Down Conductor, dan Grounding (IEC 62305-3). Semua wajib diisi.',
+      placement: 'bottom',
+    },
+    {
+      tourId: 'logbook-int',
+      title: 'LPS Internal',
+      body: 'Nilai kondisi SPD/Arester, Bonding, dan Shielding (IEC 62305-4). Semua wajib diisi.',
+      placement: 'bottom',
+    },
+    {
+      tourId: 'logbook-photo',
+      title: 'Foto bukti',
+      body: 'Unggah foto bukti. Wajib bila ada komponen yang kondisinya bukan "OK".',
+      placement: 'bottom',
+    },
+    {
+      tourId: 'logbook-submit',
+      title: 'Simpan logbook',
+      body: 'Simpan untuk memperbarui skor kesehatan. Anda akan melihat perbandingan skor sebelum → sesudah.',
+      placement: 'bottom',
+    },
+  ]
+}
+
 export default buildTourSteps

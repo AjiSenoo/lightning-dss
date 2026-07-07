@@ -15,6 +15,7 @@ const BASE_NAV_ITEMS = [
   { to: '/events', label: 'Riwayat Sambaran', icon: '🌩️', end: true, tourId: 'nav-events' },
   { to: '/inspections/new', label: 'Input Logbook', icon: '✏️', tourId: 'nav-inspections-new' },
   { to: '/events/new', label: 'Input Kejadian', icon: '⚡', tourId: 'nav-events-new' },
+  { to: '/panduan', label: 'Panduan', icon: '📖', end: true, tourId: 'nav-panduan' },
 ]
 
 const MANAGER_NAV_ITEMS = [
