@@ -101,22 +101,6 @@ export default function Login() {
               {isSubmitting ? 'Memproses...' : 'Masuk'}
             </button>
           </form>
-
-          <div className="mt-6 text-xs text-gray-400 border-t border-gray-100 pt-4">
-            <p className="font-semibold text-gray-500 mb-2">Akun demo</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium mb-1">Pertamina Group</p>
-                <p>Manajer — <code className="text-gray-600">manager / manager123</code></p>
-                <p>Teknisi — <code className="text-gray-600">teknisi / teknisi123</code></p>
-              </div>
-              <div>
-                <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium mb-1">PLN &amp; Institusi</p>
-                <p>Manajer — <code className="text-gray-600">manager2 / manager456</code></p>
-                <p>Teknisi — <code className="text-gray-600">teknisi2 / teknisi456</code></p>
-              </div>
-            </div>
-          </div>
         </div>
 
         <p className="text-center text-xs text-brand-200 mt-4">
