@@ -69,8 +69,7 @@ export default function Panduan() {
       <Section icon="🚪" title="Memulai — Masuk & Navigasi" defaultOpen>
         <Steps
           items={[
-            'Buka aplikasi, masukkan Username dan Password, lalu klik "Masuk".',
-            'Untuk mencoba, tersedia akun demo pada halaman login (mis. teknisi / teknisi123, manager / manager123).',
+            'Buka aplikasi, masukkan Username dan Password yang diberikan administrator, lalu klik "Masuk".',
             'Setelah masuk, Anda berada di Dashboard: ringkasan kesehatan aset, aset kritis, aktivitas terbaru, dan peta sambaran.',
           ]}
         />
