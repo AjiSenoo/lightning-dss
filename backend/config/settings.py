@@ -165,6 +165,14 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
     ],
+    # Brute-force guard on the login endpoint (see ThrottledTokenObtainPairView).
+    'DEFAULT_THROTTLE_RATES': {
+        'login': os.environ.get('LOGIN_THROTTLE_RATE', '10/min'),
+    },
+    # Two reverse proxies sit in front (Caddy -> nginx), so the real client IP
+    # is the 2nd-from-right entry in X-Forwarded-For. Without this, throttling
+    # would key on the nginx container IP and become a single global limit.
+    'NUM_PROXIES': int(os.environ.get('NUM_PROXIES', '2')),
 }
 
 SIMPLE_JWT = {

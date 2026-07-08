@@ -30,6 +30,18 @@ from .serializers import (
 
 logger = logging.getLogger(__name__)
 
+
+from rest_framework.throttling import ScopedRateThrottle
+from rest_framework_simplejwt.views import TokenObtainPairView
+
+
+class ThrottledTokenObtainPairView(TokenObtainPairView):
+    """Login endpoint with an anonymous rate limit (DEFAULT_THROTTLE_RATES['login'])
+    to blunt password brute-forcing on the public demo."""
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'login'
+
+
 TRACKED_FIELDS = [
     'tgl_inspeksi',
     'status_air_terminal', 'status_down_conductor', 'status_grounding',

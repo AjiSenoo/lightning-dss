@@ -54,8 +54,11 @@ services:
       args:
         VITE_API_URL: /api
     restart: unless-stopped
-    ports:
-      - "${HTTP_PORT:-8080}:80"
+    # No host port published — reachable only on the internal compose network.
+    # Caddy terminates TLS on :443 and reverse-proxies to nginx:80; all public
+    # access is HTTPS (plain-HTTP :8080 intentionally removed).
+    expose:
+      - "80"
     volumes:
       - static:/vol/static:ro
       - media:/vol/media:ro
@@ -66,7 +69,31 @@ services:
         limits:
           memory: 128M
 
+  # Edge TLS terminator: automatic Let's Encrypt certs for ${SITE_ADDRESS},
+  # http->https redirect, then reverse-proxy to nginx. Needs public :80 + :443.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - nginx
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
 volumes:
   pgdata:
   static:
   media:
+  caddy_data:
+  caddy_config:

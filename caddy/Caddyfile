@@ -1,0 +1,12 @@
+# Automatic HTTPS via Let's Encrypt. SITE_ADDRESS is a public hostname (e.g. a
+# nip.io wildcard that resolves to this box's IP), so Caddy provisions and
+# auto-renews a trusted cert and redirects http -> https on its own.
+{$SITE_ADDRESS} {
+	encode gzip
+	# HSTS on every response (incl. the SPA HTML that nginx serves directly).
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+	# Terminate TLS here and hand off to the existing nginx (SPA + /api proxy)
+	# on the internal compose network. Caddy sets X-Forwarded-Proto: https,
+	# which nginx forwards to Django (see frontend/nginx.conf).
+	reverse_proxy nginx:80
+}
