@@ -503,6 +503,12 @@ class Command(BaseCommand):
 
         ahi_values = []
         for c in active:
+            # EQP is the terminal sink node — no lightning-current damage model applies
+            # (mirrors calculate_component_ahi()). Fixed AHI 1.0 so it never wins the
+            # safety min; skip the formula, which has no EQP entry in the config maps.
+            if c.component_type == 'EQP':
+                ahi_values.append(1.0)
+                continue
             events = asset.events.filter(
                 timestamp__date__gte=c.install_date,
                 timestamp__lte=as_of,
