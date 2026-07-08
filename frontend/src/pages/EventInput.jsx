@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { UrgencyBadge } from '../components/StatusBadge'
 import MagnitudeBadge from '../components/MagnitudeBadge'
-import { URGENCY_ACTIONS, LPL_CAPACITY, formatDateTime, nowInJakarta } from '../utils/constants'
+import { URGENCY_ACTIONS, formatDateTime, nowInJakarta } from '../utils/constants'
 import useOfflineSubmit from '../hooks/useOfflineSubmit'
 import cacheStore from '../offline/cacheStore'
 import OnboardingTour from '../components/OnboardingTour'
@@ -109,7 +109,7 @@ export default function EventInput() {
               <option value="">— Pilih gedung/fasilitas —</option>
               {assets.map((a) => (
                 <option key={a.asset_id} value={a.asset_id}>
-                  {a.nama_gedung} (LPL {a.lpl_grade}, {LPL_CAPACITY[a.lpl_grade]} kA)
+                  {a.nama_gedung} (LPL {a.lpl_grade})
                 </option>
               ))}
             </select>

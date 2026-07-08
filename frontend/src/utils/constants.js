@@ -70,10 +70,10 @@ export const classifyMagnitudeKa = (ipeak) => {
 }
 
 export const LPL_LABELS = {
-  'I':   'LPL I (200 kA)',
-  'II':  'LPL II (150 kA)',
-  'III': 'LPL III (100 kA)',
-  'IV':  'LPL IV (100 kA)',
+  'I':   'LPL I',
+  'II':  'LPL II',
+  'III': 'LPL III',
+  'IV':  'LPL IV',
 }
 
 export const LPL_CAPACITY = { I: 200, II: 150, III: 100, IV: 100 }
